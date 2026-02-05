@@ -266,8 +266,7 @@ def analyze_with_gemini(ticker, stock_info, articles):
     change_pct = stock_info["change_pct"]
     direction = "rose" if change_pct > 0 else "fell"
 
-    prompt = f"""You are a financial analyst. Analyze the following news articles about {name} ({ticker})
-and explain why the stock price {direction} by {abs(change_pct):.1f}% on the previous trading day.
+    prompt = f"""출력은 한글로해라. Based on the provided news, analyze the cause of the stock price fluctuation.
 
 Stock Information:
 - Company: {name} ({ticker})
@@ -278,12 +277,10 @@ Stock Information:
 News Articles:
 {articles_block}
 
-Instructions:
-1. Identify the key factors that caused the stock price movement.
-2. Summarize the analysis in exactly 1-2 sentences in Korean. Be concise and direct.
-3. Focus on the single most impactful cause that directly influenced the stock price.
-4. Do NOT include the stock name or change percentage in your response - those will be displayed separately.
-5. Example output format: "AI 반도체 공급이 시장 예상치를 상회하며 향후 매출 상승 기대로 주가 상승함."
+1. Summarize the analysis in one sentence(noun ending) within 3 sentences.
+2. Do not include stock names or rate of change.
+3. Unless there are any issues, write it as follows: 개별이슈 미발견.
+4. Example output: 블랙웰 수요 증가로 TSMC에 생산주문을 확대했다는 소식으로 AI 관련주 전반 상승
 """
 
     try:
