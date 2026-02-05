@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify
 import requests
 from google import genai
@@ -109,71 +110,74 @@ YAHOO_HEADERS = {
 }
 
 
-def fetch_stock_changes(tickers):
-    """Fetch previous trading day's price change for each ticker via Yahoo Finance API."""
-    stock_data = {}
+def _fetch_single_ticker(ticker_symbol):
+    """Fetch a single ticker's data from Yahoo Finance API."""
+    try:
+        logger.info(f"Fetching data for {ticker_symbol}...")
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
+        params = {"range": "5d", "interval": "1d"}
+        resp = requests.get(
+            url, params=params, headers=YAHOO_HEADERS, timeout=10
+        )
 
-    for ticker_symbol in tickers:
-        try:
-            logger.info(f"Fetching data for {ticker_symbol}...")
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
-            params = {"range": "5d", "interval": "1d"}
-            resp = requests.get(
-                url, params=params, headers=YAHOO_HEADERS, timeout=10
-            )
-
-            if resp.status_code != 200:
-                msg = f"Yahoo API returned {resp.status_code}"
-                logger.warning(f"{ticker_symbol}: {msg}")
-                stock_data[ticker_symbol] = {
-                    "error": msg,
-                    "change_pct": 0,
-                    "name": ticker_symbol,
-                }
-                continue
-
-            data = resp.json()
-            result = data["chart"]["result"][0]
-            meta = result["meta"]
-            closes = result["indicators"]["quote"][0]["close"]
-            timestamps = result["timestamp"]
-
-            # Filter out None values
-            valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
-
-            if len(valid) < 2:
-                msg = f"Insufficient data (rows={len(valid)})"
-                logger.warning(f"{ticker_symbol}: {msg}")
-                stock_data[ticker_symbol] = {
-                    "error": msg,
-                    "change_pct": 0,
-                    "name": ticker_symbol,
-                }
-                continue
-
-            prev_close = valid[-2][1]
-            last_close = valid[-1][1]
-            change_pct = ((last_close - prev_close) / prev_close) * 100
-            last_date = datetime.fromtimestamp(valid[-1][0]).date()
-
-            name = meta.get("shortName", meta.get("longName", ticker_symbol))
-
-            logger.info(f"{ticker_symbol} ({name}): {change_pct:+.2f}%")
-            stock_data[ticker_symbol] = {
-                "name": name,
-                "prev_close": round(float(prev_close), 2),
-                "close": round(float(last_close), 2),
-                "change_pct": round(float(change_pct), 2),
-                "date": str(last_date),
-            }
-        except Exception as e:
-            logger.error(f"{ticker_symbol} failed: {e}", exc_info=True)
-            stock_data[ticker_symbol] = {
-                "error": str(e),
+        if resp.status_code != 200:
+            msg = f"Yahoo API returned {resp.status_code}"
+            logger.warning(f"{ticker_symbol}: {msg}")
+            return ticker_symbol, {
+                "error": msg,
                 "change_pct": 0,
                 "name": ticker_symbol,
             }
 
+        data = resp.json()
+        result = data["chart"]["result"][0]
+        meta = result["meta"]
+        closes = result["indicators"]["quote"][0]["close"]
+        timestamps = result["timestamp"]
+
+        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+
+        if len(valid) < 2:
+            msg = f"Insufficient data (rows={len(valid)})"
+            logger.warning(f"{ticker_symbol}: {msg}")
+            return ticker_symbol, {
+                "error": msg,
+                "change_pct": 0,
+                "name": ticker_symbol,
+            }
+
+        prev_close = valid[-2][1]
+        last_close = valid[-1][1]
+        change_pct = ((last_close - prev_close) / prev_close) * 100
+        last_date = datetime.fromtimestamp(valid[-1][0]).date()
+
+        name = meta.get("shortName", meta.get("longName", ticker_symbol))
+
+        logger.info(f"{ticker_symbol} ({name}): {change_pct:+.2f}%")
+        return ticker_symbol, {
+            "name": name,
+            "prev_close": round(float(prev_close), 2),
+            "close": round(float(last_close), 2),
+            "change_pct": round(float(change_pct), 2),
+            "date": str(last_date),
+        }
+    except Exception as e:
+        logger.error(f"{ticker_symbol} failed: {e}", exc_info=True)
+        return ticker_symbol, {
+            "error": str(e),
+            "change_pct": 0,
+            "name": ticker_symbol,
+        }
+
+
+def fetch_stock_changes(tickers):
+    """Fetch previous trading day's price change for each ticker via Yahoo Finance API (parallel)."""
+    stock_data = {}
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {executor.submit(_fetch_single_ticker, t): t for t in tickers}
+        for future in as_completed(futures):
+            ticker_symbol, result = future.result()
+            stock_data[ticker_symbol] = result
     return stock_data
 
 
@@ -281,6 +285,8 @@ News Articles:
 2. Do not include stock names or rate of change.
 3. Unless there are any issues, write it as follows: 개별이슈 미발견.
 4. Example output: 블랙웰 수요 증가로 TSMC에 생산주문을 확대했다는 소식으로 AI 관련주 전반 상승
+5. After the Korean summary, add a newline and write an English summary in one sentence.
+6. English example: Increased Blackwell demand and expanded production orders to TSMC boosted AI-related stocks.
 """
 
     try:
