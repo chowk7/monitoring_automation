@@ -193,7 +193,7 @@ def search_news(ticker, company_name):
 
     date_str = yesterday.strftime("%Y-%m-%d")
 
-    query = f"{company_name} ({ticker}) stock news {date_str}"
+    query = f"{company_name} Stock Price"
 
     articles = []
     # Google Custom Search API returns max 10 results per request
