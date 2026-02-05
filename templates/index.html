@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Movement Analyzer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Stock Movement Analyzer</h1>
+            <p class="subtitle">전일 주가 변동 원인 분석기</p>
+        </header>
+
+        <!-- Ticker Input Section -->
+        <section class="card ticker-input-section">
+            <h2>Ticker 등록</h2>
+            <div class="input-group">
+                <input type="text" id="tickerInput" placeholder="예: AAPL, 005930.KS"
+                       autocomplete="off" spellcheck="false">
+                <button id="addBtn" class="btn btn-add">추가</button>
+            </div>
+            <p class="hint">미국 주식: AAPL, TSLA / 한국 주식: 005930.KS (삼성전자), 000660.KS (SK하이닉스)</p>
+        </section>
+
+        <!-- Saved Tickers Section -->
+        <section class="card ticker-list-section">
+            <div class="section-header">
+                <h2>등록된 Tickers</h2>
+                <span id="tickerCount" class="badge">0</span>
+            </div>
+            <div id="tickerList" class="ticker-list">
+                <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
+            </div>
+            <button id="analyzeBtn" class="btn btn-analyze" disabled>
+                <span class="btn-icon">&#9654;</span> 분석 실행
+            </button>
+        </section>
+
+        <!-- Loading Section -->
+        <section id="loadingSection" class="card loading-section" style="display:none;">
+            <div class="spinner"></div>
+            <p id="loadingText">주가 데이터를 수집하고 있습니다...</p>
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill"></div>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section id="resultsSection" class="card results-section" style="display:none;">
+            <h2>분석 결과</h2>
+
+            <!-- All stocks overview -->
+            <div id="allStocksOverview" class="stocks-overview"></div>
+
+            <!-- Filtered analysis results -->
+            <div id="analysisResults"></div>
+        </section>
+
+        <!-- Error Section -->
+        <section id="errorSection" class="card error-section" style="display:none;">
+            <p id="errorText"></p>
+        </section>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
