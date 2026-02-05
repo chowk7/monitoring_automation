@@ -3,7 +3,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify
-import yfinance as yf
 import requests
 from google import genai
 from dotenv import load_dotenv
@@ -104,20 +103,26 @@ def analyze():
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
 
+YAHOO_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+
+
 def fetch_stock_changes(tickers):
-    """Fetch previous trading day's price change for each ticker."""
+    """Fetch previous trading day's price change for each ticker via Yahoo Finance API."""
     stock_data = {}
 
     for ticker_symbol in tickers:
         try:
             logger.info(f"Fetching data for {ticker_symbol}...")
-            ticker_obj = yf.Ticker(ticker_symbol)
-            # Get last 5 days to ensure we have enough data
-            hist = ticker_obj.history(period="5d")
-            logger.info(f"{ticker_symbol} history rows: {len(hist)}")
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
+            params = {"range": "5d", "interval": "1d"}
+            resp = requests.get(
+                url, params=params, headers=YAHOO_HEADERS, timeout=10
+            )
 
-            if hist.empty or len(hist) < 2:
-                msg = f"Insufficient data (rows={len(hist)})"
+            if resp.status_code != 200:
+                msg = f"Yahoo API returned {resp.status_code}"
                 logger.warning(f"{ticker_symbol}: {msg}")
                 stock_data[ticker_symbol] = {
                     "error": msg,
@@ -126,14 +131,31 @@ def fetch_stock_changes(tickers):
                 }
                 continue
 
-            # Previous trading day = last row, day before = second to last
-            prev_close = hist["Close"].iloc[-2]
-            last_close = hist["Close"].iloc[-1]
-            change_pct = ((last_close - prev_close) / prev_close) * 100
+            data = resp.json()
+            result = data["chart"]["result"][0]
+            meta = result["meta"]
+            closes = result["indicators"]["quote"][0]["close"]
+            timestamps = result["timestamp"]
 
-            # Try to get company name
-            info = ticker_obj.info
-            name = info.get("shortName", info.get("longName", ticker_symbol))
+            # Filter out None values
+            valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+
+            if len(valid) < 2:
+                msg = f"Insufficient data (rows={len(valid)})"
+                logger.warning(f"{ticker_symbol}: {msg}")
+                stock_data[ticker_symbol] = {
+                    "error": msg,
+                    "change_pct": 0,
+                    "name": ticker_symbol,
+                }
+                continue
+
+            prev_close = valid[-2][1]
+            last_close = valid[-1][1]
+            change_pct = ((last_close - prev_close) / prev_close) * 100
+            last_date = datetime.fromtimestamp(valid[-1][0]).date()
+
+            name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
             logger.info(f"{ticker_symbol} ({name}): {change_pct:+.2f}%")
             stock_data[ticker_symbol] = {
@@ -141,7 +163,7 @@ def fetch_stock_changes(tickers):
                 "prev_close": round(float(prev_close), 2),
                 "close": round(float(last_close), 2),
                 "change_pct": round(float(change_pct), 2),
-                "date": str(hist.index[-1].date()),
+                "date": str(last_date),
             }
         except Exception as e:
             logger.error(f"{ticker_symbol} failed: {e}", exc_info=True)
