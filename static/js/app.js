@@ -187,6 +187,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 const sign = result.change_pct > 0 ? "+" : "";
                 const analysisHtml = formatAnalysis(result.analysis);
 
+                // Build article list HTML
+                let articlesHtml = "";
+                if (result.articles && result.articles.length > 0) {
+                    articlesHtml = '<div class="result-articles"><h4>참고 기사</h4><ul>';
+                    for (const article of result.articles) {
+                        const dateStr = article.date ? `<span class="article-date">${escapeHtml(article.date)}</span>` : "";
+                        articlesHtml += `<li>${dateStr}<a href="${escapeHtml(article.link)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></li>`;
+                    }
+                    articlesHtml += "</ul></div>";
+                }
+
                 html += `
                     <div class="result-card ${cls}">
                         <div class="result-header">
@@ -195,6 +206,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             <span class="result-meta">${result.article_count}건의 기사 분석</span>
                         </div>
                         <div class="result-analysis">${analysisHtml}</div>
+                        ${articlesHtml}
                     </div>
                 `;
             }

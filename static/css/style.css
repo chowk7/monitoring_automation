@@ -354,6 +354,58 @@ header h1 {
     margin-bottom: 10px;
 }
 
+/* ─── Article List ────────────────────────────────────────────────────────── */
+.result-articles {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #2a3a4a;
+}
+
+.result-articles h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #7a8a9e;
+    margin-bottom: 8px;
+}
+
+.result-articles ul {
+    list-style: none;
+    padding: 0;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.result-articles li {
+    padding: 5px 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    border-bottom: 1px solid rgba(42, 58, 74, 0.5);
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.result-articles li:last-child {
+    border-bottom: none;
+}
+
+.article-date {
+    color: #5a6a7a;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.result-articles a {
+    color: #7ab3e0;
+    text-decoration: none;
+}
+
+.result-articles a:hover {
+    color: #a3d0f5;
+    text-decoration: underline;
+}
+
 .no-filter-message {
     text-align: center;
     padding: 24px;

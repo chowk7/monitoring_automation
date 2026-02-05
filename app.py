@@ -89,6 +89,7 @@ def analyze():
             "prev_close": info.get("prev_close", 0),
             "close": info.get("close", 0),
             "analysis": analysis,
+            "articles": articles,
             "article_count": len(articles),
         })
 
@@ -215,10 +216,27 @@ def search_news(ticker, company_name):
             if resp.status_code == 200:
                 data = resp.json()
                 for item in data.get("items", []):
+                    # Extract date from pagemap or snippet metadata
+                    pub_date = ""
+                    metatags = (
+                        item.get("pagemap", {})
+                        .get("metatags", [{}])[0]
+                    )
+                    pub_date = (
+                        metatags.get("article:published_time", "")
+                        or metatags.get("og:updated_time", "")
+                        or metatags.get("datePublished", "")
+                        or item.get("snippet", "")[:10]
+                    )
+                    # Trim to date portion if ISO format
+                    if pub_date and "T" in pub_date:
+                        pub_date = pub_date.split("T")[0]
+
                     articles.append({
                         "title": item.get("title", ""),
                         "snippet": item.get("snippet", ""),
                         "link": item.get("link", ""),
+                        "date": pub_date,
                     })
         except Exception:
             continue
@@ -262,10 +280,10 @@ News Articles:
 
 Instructions:
 1. Identify the key factors that caused the stock price movement.
-2. Summarize the analysis in 2-3 concise paragraphs in Korean.
-3. Focus on the most impactful events/news that directly influenced the stock price.
-4. Be specific about the cause-and-effect relationship.
-5. Do NOT include the stock name or change percentage in your response - those will be displayed separately.
+2. Summarize the analysis in exactly 1-2 sentences in Korean. Be concise and direct.
+3. Focus on the single most impactful cause that directly influenced the stock price.
+4. Do NOT include the stock name or change percentage in your response - those will be displayed separately.
+5. Example output format: "AI 반도체 공급이 시장 예상치를 상회하며 향후 매출 상승 기대로 주가 상승함."
 """
 
     try:
