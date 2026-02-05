@@ -74,7 +74,7 @@ def analyze():
     if not filtered:
         return jsonify({
             "results": [],
-            "all_stocks": stock_data,
+            "all_stocks": _slim_stock_data(stock_data),
             "message": "No stocks with +/- 5% or more change found."
         })
 
@@ -83,6 +83,11 @@ def analyze():
     for ticker, info in filtered.items():
         articles = search_news(ticker, info.get("name", ticker))
         analysis = analyze_with_gemini(ticker, info, articles)
+        # Strip snippet from articles to reduce response size
+        articles_slim = [
+            {"title": a["title"], "link": a["link"], "date": a.get("date", "")}
+            for a in articles
+        ]
         results.append({
             "ticker": ticker,
             "name": info.get("name", ticker),
@@ -90,7 +95,7 @@ def analyze():
             "prev_close": info.get("prev_close", 0),
             "close": info.get("close", 0),
             "analysis": analysis,
-            "articles": articles,
+            "articles": articles_slim,
             "article_count": len(articles),
         })
 
@@ -99,8 +104,21 @@ def analyze():
 
     return jsonify({
         "results": results,
-        "all_stocks": stock_data,
+        "all_stocks": _slim_stock_data(stock_data),
     })
+
+
+def _slim_stock_data(stock_data):
+    """Return only fields needed by the frontend overview."""
+    slim = {}
+    for ticker, info in stock_data.items():
+        slim[ticker] = {
+            "name": info.get("name", ticker),
+            "change_pct": info.get("change_pct", 0),
+        }
+        if "error" in info:
+            slim[ticker]["error"] = info["error"]
+    return slim
 
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
@@ -173,7 +191,7 @@ def _fetch_single_ticker(ticker_symbol):
 def fetch_stock_changes(tickers):
     """Fetch previous trading day's price change for each ticker via Yahoo Finance API (parallel)."""
     stock_data = {}
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(_fetch_single_ticker, t): t for t in tickers}
         for future in as_completed(futures):
             ticker_symbol, result = future.result()
