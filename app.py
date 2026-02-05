@@ -2,11 +2,17 @@ import os
 import gc
 import logging
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify
 import requests
 from google import genai
 from dotenv import load_dotenv
+
+# Memory monitoring
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 load_dotenv()
 
@@ -24,6 +30,18 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
+
+# Limits for 512MB memory
+MAX_FILTERED_STOCKS = 15  # Only analyze top 15 movers
+BATCH_SIZE = 20  # Fetch tickers in batches of 20
+
+
+def log_memory(label=""):
+    """Log current memory usage."""
+    if HAS_PSUTIL:
+        process = psutil.Process()
+        mem = process.memory_info()
+        logger.info(f"[MEM {label}] RSS: {mem.rss / 1024 / 1024:.1f}MB, VMS: {mem.vms / 1024 / 1024:.1f}MB")
 
 
 def get_gemini_client():
@@ -71,99 +89,93 @@ def analyze():
     if not saved_tickers:
         return jsonify({"error": "No tickers saved. Please add tickers first."}), 400
 
-    # Step 1: Fetch previous day's stock price changes
-    stock_data = fetch_stock_changes(saved_tickers)
+    log_memory("START")
 
-    # Immediately slim stock_data for response
-    all_stocks_slim = _slim_stock_data(stock_data)
+    # Step 1: Fetch stock data in batches (sequential, not parallel)
+    all_stocks_slim = {}
+    filtered_list = []
 
-    # Step 2: Filter stocks with >= +/-5% change
-    filtered_tickers = [
-        (ticker, info)
-        for ticker, info in stock_data.items()
-        if abs(info.get("change_pct", 0)) >= 5.0
-    ]
+    for i in range(0, len(saved_tickers), BATCH_SIZE):
+        batch = saved_tickers[i:i + BATCH_SIZE]
+        log_memory(f"BATCH {i // BATCH_SIZE + 1}")
 
-    # Free up memory - only keep filtered data
-    del stock_data
-    gc.collect()
+        for ticker in batch:
+            result = fetch_single_ticker(ticker)
+            # Immediately slim for response
+            all_stocks_slim[ticker] = {
+                "name": result.get("name", ticker),
+                "change_pct": result.get("change_pct", 0),
+            }
+            if "error" in result:
+                all_stocks_slim[ticker]["error"] = result["error"]
 
-    if not filtered_tickers:
+            # Check if filtered
+            if abs(result.get("change_pct", 0)) >= 5.0:
+                filtered_list.append((ticker, result))
+
+        gc.collect()
+
+    log_memory("AFTER FETCH")
+
+    if not filtered_list:
         return jsonify({
             "results": [],
             "all_stocks": all_stocks_slim,
             "message": "No stocks with +/- 5% or more change found."
         })
 
-    # Step 3 & 4: Process filtered stocks one by one to minimize memory
+    # Sort by absolute change and limit to top N
+    filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+    filtered_list = filtered_list[:MAX_FILTERED_STOCKS]
+
+    logger.info(f"Processing {len(filtered_list)} filtered stocks (limited to {MAX_FILTERED_STOCKS})")
+
+    # Step 2: Process filtered stocks ONE BY ONE
     results = []
-    for ticker, info in filtered_tickers:
-        # Fetch articles (limited to 10)
-        articles = search_news(ticker, info.get("name", ticker))
+    for idx, (ticker, info) in enumerate(filtered_list):
+        log_memory(f"STOCK {idx + 1}/{len(filtered_list)}")
 
-        # Analyze with Gemini
-        analysis = analyze_with_gemini(ticker, info, articles)
+        try:
+            # Fetch articles
+            articles = search_news(ticker, info.get("name", ticker))
 
-        # Keep only top 2 unique articles for display
-        top_articles = _get_top_articles(articles, limit=2)
+            # Analyze
+            analysis = analyze_with_gemini(ticker, info, articles)
 
-        results.append({
-            "ticker": ticker,
-            "name": info.get("name", ticker),
-            "change_pct": info["change_pct"],
-            "analysis": analysis,
-            "articles": top_articles,
-            "article_count": len(articles),
-        })
+            # Keep only top 2 unique articles
+            top_articles = get_top_articles(articles, limit=2)
 
-        # Clear article data immediately after processing
-        del articles
+            results.append({
+                "ticker": ticker,
+                "name": info.get("name", ticker),
+                "change_pct": info["change_pct"],
+                "analysis": analysis,
+                "articles": top_articles,
+                "article_count": len(articles),
+            })
+
+            # Aggressive cleanup
+            del articles
+            del analysis
+        except Exception as e:
+            logger.error(f"Error processing {ticker}: {e}")
+            results.append({
+                "ticker": ticker,
+                "name": info.get("name", ticker),
+                "change_pct": info["change_pct"],
+                "analysis": f"Analysis failed: {str(e)}",
+                "articles": [],
+                "article_count": 0,
+            })
+
         gc.collect()
 
-    # Sort by absolute change descending
-    results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+    log_memory("DONE")
 
     return jsonify({
         "results": results,
         "all_stocks": all_stocks_slim,
     })
-
-
-def _slim_stock_data(stock_data):
-    """Return only fields needed by the frontend overview."""
-    slim = {}
-    for ticker, info in stock_data.items():
-        slim[ticker] = {
-            "name": info.get("name", ticker),
-            "change_pct": info.get("change_pct", 0),
-        }
-        if "error" in info:
-            slim[ticker]["error"] = info["error"]
-    return slim
-
-
-def _get_top_articles(articles, limit=2):
-    """Get top unique articles, removing duplicates by similar titles."""
-    if not articles:
-        return []
-
-    seen_titles = set()
-    unique = []
-
-    for a in articles:
-        # Normalize title for comparison
-        title_key = a["title"].lower()[:50]
-        if title_key not in seen_titles:
-            seen_titles.add(title_key)
-            unique.append({
-                "title": a["title"],
-                "link": a["link"],
-                "date": a.get("date", ""),
-            })
-            if len(unique) >= limit:
-                break
-
-    return unique
 
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
@@ -173,17 +185,15 @@ YAHOO_HEADERS = {
 }
 
 
-def _fetch_single_ticker(ticker_symbol):
+def fetch_single_ticker(ticker_symbol):
     """Fetch a single ticker's data from Yahoo Finance API."""
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
         params = {"range": "5d", "interval": "1d"}
-        resp = requests.get(
-            url, params=params, headers=YAHOO_HEADERS, timeout=10
-        )
+        resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
 
         if resp.status_code != 200:
-            return ticker_symbol, {
+            return {
                 "error": f"Yahoo API returned {resp.status_code}",
                 "change_pct": 0,
                 "name": ticker_symbol,
@@ -198,7 +208,7 @@ def _fetch_single_ticker(ticker_symbol):
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
         if len(valid) < 2:
-            return ticker_symbol, {
+            return {
                 "error": f"Insufficient data (rows={len(valid)})",
                 "change_pct": 0,
                 "name": ticker_symbol,
@@ -208,44 +218,31 @@ def _fetch_single_ticker(ticker_symbol):
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
         last_date = datetime.fromtimestamp(valid[-1][0]).date()
-
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
-        return ticker_symbol, {
+        return {
             "name": name,
             "change_pct": round(float(change_pct), 2),
             "date": str(last_date),
         }
     except Exception as e:
-        return ticker_symbol, {
+        return {
             "error": str(e),
             "change_pct": 0,
             "name": ticker_symbol,
         }
 
 
-def fetch_stock_changes(tickers):
-    """Fetch stock data with reduced parallelism for memory efficiency."""
-    stock_data = {}
-    # Reduced workers: 5 instead of 10
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(_fetch_single_ticker, t): t for t in tickers}
-        for future in as_completed(futures):
-            ticker_symbol, result = future.result()
-            stock_data[ticker_symbol] = result
-    return stock_data
-
-
 def search_news(ticker, company_name):
-    """Search Google for recent news - limited to 10 articles."""
+    """Search Google for news - limited to 10 articles."""
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
         return []
 
     today = datetime.now()
     yesterday = today - timedelta(days=1)
-    if yesterday.weekday() == 6:  # Sunday
+    if yesterday.weekday() == 6:
         yesterday = yesterday - timedelta(days=2)
-    elif yesterday.weekday() == 5:  # Saturday
+    elif yesterday.weekday() == 5:
         yesterday = yesterday - timedelta(days=1)
 
     date_str = yesterday.strftime("%Y-%m-%d")
@@ -253,7 +250,6 @@ def search_news(ticker, company_name):
 
     articles = []
     try:
-        # Only 1 request (10 articles) instead of 2 (20 articles)
         params = {
             "key": GOOGLE_API_KEY,
             "cx": GOOGLE_CSE_ID,
@@ -275,7 +271,6 @@ def search_news(ticker, company_name):
                 pub_date = (
                     metatags.get("article:published_time", "")
                     or metatags.get("og:updated_time", "")
-                    or metatags.get("datePublished", "")
                     or ""
                 )
                 if pub_date and "T" in pub_date:
@@ -283,7 +278,7 @@ def search_news(ticker, company_name):
 
                 articles.append({
                     "title": item.get("title", ""),
-                    "snippet": item.get("snippet", ""),
+                    "snippet": item.get("snippet", "")[:100],  # Limit snippet
                     "link": item.get("link", ""),
                     "date": pub_date,
                 })
@@ -291,6 +286,27 @@ def search_news(ticker, company_name):
         pass
 
     return articles[:10]
+
+
+def get_top_articles(articles, limit=2):
+    """Get top unique articles by title."""
+    if not articles:
+        return []
+
+    seen = set()
+    unique = []
+    for a in articles:
+        key = a["title"].lower()[:40]
+        if key not in seen:
+            seen.add(key)
+            unique.append({
+                "title": a["title"],
+                "link": a["link"],
+                "date": a.get("date", ""),
+            })
+            if len(unique) >= limit:
+                break
+    return unique
 
 
 def analyze_with_gemini(ticker, stock_info, articles):
@@ -305,27 +321,25 @@ def analyze_with_gemini(ticker, stock_info, articles):
     if not client:
         return "Gemini client initialization failed."
 
-    # Build compact prompt with limited articles
-    article_texts = []
-    for i, article in enumerate(articles[:10], 1):
-        article_texts.append(f"{i}. {article['title']}: {article['snippet'][:100]}")
+    # Compact prompt
+    article_texts = [f"{i}. {a['title'][:60]}" for i, a in enumerate(articles[:5], 1)]
     articles_block = "\n".join(article_texts)
 
     name = stock_info.get("name", ticker)
     change_pct = stock_info["change_pct"]
 
-    prompt = f"""출력은 한글로해라. Based on the provided news, analyze the cause of the stock price fluctuation.
+    prompt = f"""출력은 한글로해라. Based on the news, analyze stock price fluctuation cause.
 
 Stock: {name} ({ticker}), Change: {change_pct:+.1f}%
 
 News:
 {articles_block}
 
-1. Summarize the analysis in one sentence(noun ending) within 3 sentences.
-2. Do not include stock names or rate of change.
-3. Unless there are any issues, write it as follows: 개별이슈 미발견.
-4. Example: 블랙웰 수요 증가로 TSMC에 생산주문을 확대했다는 소식으로 AI 관련주 전반 상승
-5. After Korean, add newline and one English sentence summary.
+1. One sentence summary (noun ending), max 3 sentences.
+2. No stock names or rate of change.
+3. If no issues: 개별이슈 미발견.
+4. Example: 블랙웰 수요 증가로 AI 관련주 전반 상승
+5. Add English one sentence after Korean.
 """
 
     try:
