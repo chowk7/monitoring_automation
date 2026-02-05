@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify
 import yfinance as yf
@@ -10,6 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # In-memory ticker storage
 saved_tickers = []
@@ -107,13 +110,17 @@ def fetch_stock_changes(tickers):
 
     for ticker_symbol in tickers:
         try:
+            logger.info(f"Fetching data for {ticker_symbol}...")
             ticker_obj = yf.Ticker(ticker_symbol)
             # Get last 5 days to ensure we have enough data
             hist = ticker_obj.history(period="5d")
+            logger.info(f"{ticker_symbol} history rows: {len(hist)}")
 
             if hist.empty or len(hist) < 2:
+                msg = f"Insufficient data (rows={len(hist)})"
+                logger.warning(f"{ticker_symbol}: {msg}")
                 stock_data[ticker_symbol] = {
-                    "error": "Insufficient data",
+                    "error": msg,
                     "change_pct": 0,
                     "name": ticker_symbol,
                 }
@@ -128,6 +135,7 @@ def fetch_stock_changes(tickers):
             info = ticker_obj.info
             name = info.get("shortName", info.get("longName", ticker_symbol))
 
+            logger.info(f"{ticker_symbol} ({name}): {change_pct:+.2f}%")
             stock_data[ticker_symbol] = {
                 "name": name,
                 "prev_close": round(float(prev_close), 2),
@@ -136,6 +144,7 @@ def fetch_stock_changes(tickers):
                 "date": str(hist.index[-1].date()),
             }
         except Exception as e:
+            logger.error(f"{ticker_symbol} failed: {e}", exc_info=True)
             stock_data[ticker_symbol] = {
                 "error": str(e),
                 "change_pct": 0,

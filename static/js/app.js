@@ -164,7 +164,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             for (const [ticker, info] of entries) {
                 if (info.error && info.change_pct === 0) {
-                    overviewHtml += `<div class="overview-item neutral">${escapeHtml(ticker)} (데이터 없음)</div>`;
+                    overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(info.error)}">${escapeHtml(ticker)} (오류: ${escapeHtml(info.error)})</div>`;
                     continue;
                 }
                 const cls = info.change_pct > 0 ? "positive" : info.change_pct < 0 ? "negative" : "neutral";
