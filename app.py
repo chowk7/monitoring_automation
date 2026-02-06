@@ -137,6 +137,7 @@ def analyze_stream():
 
         # Phase 2: Analyze filtered stocks in batches
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
+        is_first_ticker = True
 
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
             batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
@@ -150,6 +151,14 @@ def analyze_stream():
             for ticker, info in batch:
                 try:
                     articles = search_news(ticker, info.get("name", ticker))
+
+                    # Log all article URLs for the first ticker only
+                    if is_first_ticker and articles:
+                        logger.info(f"=== First ticker [{ticker}] article URLs ===")
+                        for i, a in enumerate(articles, 1):
+                            logger.info(f"  {i}. {a['link']}")
+                        is_first_ticker = False
+
                     result = analyze_with_gemini(ticker, info, articles)
                     analysis = result["analysis"]
                     used_indices = result["used_indices"]
@@ -276,7 +285,7 @@ def search_news(ticker, company_name):
         yesterday = yesterday - timedelta(days=1)
 
     date_str = yesterday.strftime("%Y-%m-%d")
-    query = f"News {company_name} after:{date_str} -quote"
+    query = f"news {company_name} stock after:{date_str} -quote"
 
     articles = []
     # Fetch 20 articles (2 requests of 10 each)
