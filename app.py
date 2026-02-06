@@ -31,8 +31,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
-# Limits for 512MB memory
-MAX_FILTERED_STOCKS = 15  # Only analyze top 15 movers
+# Memory optimization settings
 BATCH_SIZE = 20  # Fetch tickers in batches of 20
 
 
@@ -124,11 +123,10 @@ def analyze():
             "message": "No stocks with +/- 5% or more change found."
         })
 
-    # Sort by absolute change and limit to top N
+    # Sort by absolute change
     filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
-    filtered_list = filtered_list[:MAX_FILTERED_STOCKS]
 
-    logger.info(f"Processing {len(filtered_list)} filtered stocks (limited to {MAX_FILTERED_STOCKS})")
+    logger.info(f"Processing {len(filtered_list)} filtered stocks")
 
     # Step 2: Process filtered stocks ONE BY ONE
     results = []
@@ -321,8 +319,8 @@ def analyze_with_gemini(ticker, stock_info, articles):
     if not client:
         return "Gemini client initialization failed."
 
-    # Compact prompt
-    article_texts = [f"{i}. {a['title'][:60]}" for i, a in enumerate(articles[:5], 1)]
+    # Compact prompt with title + snippet (100 chars)
+    article_texts = [f"{i}. {a['title']}: {a.get('snippet', '')[:100]}" for i, a in enumerate(articles[:5], 1)]
     articles_block = "\n".join(article_texts)
 
     name = stock_info.get("name", ticker)
