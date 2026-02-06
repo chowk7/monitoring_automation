@@ -2,6 +2,7 @@ import os
 import gc
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response
 import requests
@@ -149,15 +150,27 @@ def analyze_stream():
             for ticker, info in batch:
                 try:
                     articles = search_news(ticker, info.get("name", ticker))
-                    analysis = analyze_with_gemini(ticker, info, articles)
-                    top_articles = get_top_articles(articles, limit=2)
+                    result = analyze_with_gemini(ticker, info, articles)
+                    analysis = result["analysis"]
+                    used_indices = result["used_indices"]
+
+                    # Get articles that Gemini actually used
+                    selected_articles = []
+                    for idx in used_indices[:2]:
+                        if 0 <= idx < len(articles):
+                            a = articles[idx]
+                            selected_articles.append({
+                                "title": a["title"],
+                                "link": a["link"],
+                                "date": a.get("date", ""),
+                            })
 
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": analysis,
-                        "articles": top_articles,
+                        "articles": selected_articles,
                         "article_count": len(articles),
                     })
 
@@ -251,7 +264,7 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def search_news(ticker, company_name):
-    """Search Google for news - limited to 10 articles."""
+    """Search Google for news - fetches 20 articles (2 API calls)."""
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
         return []
 
@@ -266,79 +279,61 @@ def search_news(ticker, company_name):
     query = f"News {company_name} after:{date_str} -quote"
 
     articles = []
-    try:
-        params = {
-            "key": GOOGLE_API_KEY,
-            "cx": GOOGLE_CSE_ID,
-            "q": query,
-            "num": 10,
-            "start": 1,
-            "dateRestrict": "d1",
-            "sort": "date",
-        }
-        resp = requests.get(
-            "https://www.googleapis.com/customsearch/v1",
-            params=params,
-            timeout=10,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            for item in data.get("items", []):
-                metatags = item.get("pagemap", {}).get("metatags", [{}])[0]
-                pub_date = (
-                    metatags.get("article:published_time", "")
-                    or metatags.get("og:updated_time", "")
-                    or ""
-                )
-                if pub_date and "T" in pub_date:
-                    pub_date = pub_date.split("T")[0]
+    # Fetch 20 articles (2 requests of 10 each)
+    for start_idx in [1, 11]:
+        try:
+            params = {
+                "key": GOOGLE_API_KEY,
+                "cx": GOOGLE_CSE_ID,
+                "q": query,
+                "num": 10,
+                "start": start_idx,
+                "dateRestrict": "d1",
+                "sort": "date",
+            }
+            resp = requests.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params=params,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("items", []):
+                    metatags = item.get("pagemap", {}).get("metatags", [{}])[0]
+                    pub_date = (
+                        metatags.get("article:published_time", "")
+                        or metatags.get("og:updated_time", "")
+                        or ""
+                    )
+                    if pub_date and "T" in pub_date:
+                        pub_date = pub_date.split("T")[0]
 
-                articles.append({
-                    "title": item.get("title", ""),
-                    "snippet": item.get("snippet", "")[:100],
-                    "link": item.get("link", ""),
-                    "date": pub_date,
-                })
-    except Exception:
-        pass
+                    articles.append({
+                        "title": item.get("title", ""),
+                        "snippet": item.get("snippet", "")[:100],
+                        "link": item.get("link", ""),
+                        "date": pub_date,
+                    })
+        except Exception:
+            pass
 
-    return articles[:10]
-
-
-def get_top_articles(articles, limit=2):
-    """Get top unique articles by title."""
-    if not articles:
-        return []
-
-    seen = set()
-    unique = []
-    for a in articles:
-        key = a["title"].lower()[:40]
-        if key not in seen:
-            seen.add(key)
-            unique.append({
-                "title": a["title"],
-                "link": a["link"],
-                "date": a.get("date", ""),
-            })
-            if len(unique) >= limit:
-                break
-    return unique
+    return articles[:20]
 
 
 def analyze_with_gemini(ticker, stock_info, articles):
-    """Use Gemini API to analyze articles."""
+    """Use Gemini API to analyze articles. Returns dict with analysis and used article indices."""
     if not GEMINI_API_KEY:
-        return "Gemini API key not configured."
+        return {"analysis": "Gemini API key not configured.", "used_indices": []}
 
     if not articles:
-        return "No news articles found for analysis."
+        return {"analysis": "No news articles found for analysis.", "used_indices": []}
 
     client = get_gemini_client()
     if not client:
-        return "Gemini client initialization failed."
+        return {"analysis": "Gemini client initialization failed.", "used_indices": []}
 
-    article_texts = [f"{i}. {a['title']}: {a.get('snippet', '')[:100]}" for i, a in enumerate(articles[:5], 1)]
+    # Use all 20 articles
+    article_texts = [f"{i}. {a['title']}: {a.get('snippet', '')[:100]}" for i, a in enumerate(articles[:20], 1)]
     articles_block = "\n".join(article_texts)
 
     name = stock_info.get("name", ticker)
@@ -351,11 +346,13 @@ Stock: {name} ({ticker}), Change: {change_pct:+.1f}%
 News:
 {articles_block}
 
+Instructions:
 1. One sentence summary (noun ending), max 3 sentences.
 2. No stock names or rate of change.
 3. If no issues: 개별이슈 미발견.
 4. Example: 블랙웰 수요 증가로 AI 관련주 전반 상승
 5. Add English one sentence after Korean.
+6. At the end, add a line: USED_ARTICLES: X, Y (where X and Y are the article numbers you actually used for analysis, pick the 2 most relevant ones)
 """
 
     try:
@@ -363,9 +360,24 @@ News:
             model="gemini-2.0-flash",
             contents=prompt,
         )
-        return response.text
+        response_text = response.text
+
+        # Parse used article indices from response
+        used_indices = []
+        analysis = response_text
+
+        if "USED_ARTICLES:" in response_text:
+            parts = response_text.split("USED_ARTICLES:")
+            analysis = parts[0].strip()
+            if len(parts) > 1:
+                indices_str = parts[1].strip()
+                # Extract numbers from the indices string
+                numbers = re.findall(r'\d+', indices_str)
+                used_indices = [int(n) - 1 for n in numbers[:2] if int(n) <= len(articles)]
+
+        return {"analysis": analysis, "used_indices": used_indices}
     except Exception as e:
-        return f"Analysis failed: {str(e)}"
+        return {"analysis": f"Analysis failed: {str(e)}", "used_indices": []}
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
