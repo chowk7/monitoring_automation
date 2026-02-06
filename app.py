@@ -263,7 +263,7 @@ def search_news(ticker, company_name):
         yesterday = yesterday - timedelta(days=1)
 
     date_str = yesterday.strftime("%Y-%m-%d")
-    query = f"{company_name} Stock Price after:{date_str}"
+    query = f"News {company_name} after:{date_str}"
 
     articles = []
     try:
