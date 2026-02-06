@@ -35,7 +35,7 @@ _gemini_client = None
 
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
-ANALYSIS_BATCH_SIZE = 10  # Analyze filtered stocks in batches
+ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
 
 
 def log_memory(label=""):
