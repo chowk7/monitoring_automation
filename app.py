@@ -1,8 +1,9 @@
 import os
 import gc
+import json
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
 from dotenv import load_dotenv
@@ -31,8 +32,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
-# Memory optimization settings
-BATCH_SIZE = 20  # Fetch tickers in batches of 20
+# Batch settings
+FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
+ANALYSIS_BATCH_SIZE = 10  # Analyze filtered stocks in batches
 
 
 def log_memory(label=""):
@@ -40,7 +42,7 @@ def log_memory(label=""):
     if HAS_PSUTIL:
         process = psutil.Process()
         mem = process.memory_info()
-        logger.info(f"[MEM {label}] RSS: {mem.rss / 1024 / 1024:.1f}MB, VMS: {mem.vms / 1024 / 1024:.1f}MB")
+        logger.info(f"[MEM {label}] RSS: {mem.rss / 1024 / 1024:.1f}MB")
 
 
 def get_gemini_client():
@@ -82,98 +84,115 @@ def delete_ticker(ticker):
     return jsonify({"tickers": saved_tickers})
 
 
+@app.route("/api/analyze/stream", methods=["GET"])
+def analyze_stream():
+    """Streaming analysis - sends results in batches via SSE."""
+    if not saved_tickers:
+        return jsonify({"error": "No tickers saved."}), 400
+
+    def generate():
+        log_memory("STREAM START")
+
+        # Phase 1: Fetch all stock data in batches
+        all_stocks_slim = {}
+        filtered_list = []
+
+        total_batches = (len(saved_tickers) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
+
+        for batch_idx in range(0, len(saved_tickers), FETCH_BATCH_SIZE):
+            batch = saved_tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
+            batch_num = batch_idx // FETCH_BATCH_SIZE + 1
+
+            # Send progress
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
+
+            for ticker in batch:
+                result = fetch_single_ticker(ticker)
+                all_stocks_slim[ticker] = {
+                    "name": result.get("name", ticker),
+                    "change_pct": result.get("change_pct", 0),
+                }
+                if "error" in result:
+                    all_stocks_slim[ticker]["error"] = result["error"]
+
+                if abs(result.get("change_pct", 0)) >= 5.0:
+                    filtered_list.append((ticker, result))
+
+            gc.collect()
+
+        # Send all_stocks data
+        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim})}\n\n"
+
+        log_memory("AFTER FETCH")
+
+        if not filtered_list:
+            yield f"data: {json.dumps({'type': 'done', 'message': 'No stocks with +/- 5% change found.'})}\n\n"
+            return
+
+        # Sort filtered list
+        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
+
+        # Phase 2: Analyze filtered stocks in batches
+        total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
+
+        for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
+            batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
+            batch_num = batch_idx // ANALYSIS_BATCH_SIZE + 1
+
+            log_memory(f"ANALYSIS BATCH {batch_num}")
+
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
+
+            batch_results = []
+            for ticker, info in batch:
+                try:
+                    articles = search_news(ticker, info.get("name", ticker))
+                    analysis = analyze_with_gemini(ticker, info, articles)
+                    top_articles = get_top_articles(articles, limit=2)
+
+                    batch_results.append({
+                        "ticker": ticker,
+                        "name": info.get("name", ticker),
+                        "change_pct": info["change_pct"],
+                        "analysis": analysis,
+                        "articles": top_articles,
+                        "article_count": len(articles),
+                    })
+
+                    del articles
+                except Exception as e:
+                    logger.error(f"Error processing {ticker}: {e}")
+                    batch_results.append({
+                        "ticker": ticker,
+                        "name": info.get("name", ticker),
+                        "change_pct": info["change_pct"],
+                        "analysis": f"Analysis failed: {str(e)}",
+                        "articles": [],
+                        "article_count": 0,
+                    })
+
+                gc.collect()
+
+            # Send batch results
+            yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
+
+            # Clear batch data
+            del batch_results
+            gc.collect()
+
+        log_memory("STREAM DONE")
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
+# Legacy endpoint (for compatibility)
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
-    """Main analysis pipeline - memory optimized for 512MB."""
-    if not saved_tickers:
-        return jsonify({"error": "No tickers saved. Please add tickers first."}), 400
-
-    log_memory("START")
-
-    # Step 1: Fetch stock data in batches (sequential, not parallel)
-    all_stocks_slim = {}
-    filtered_list = []
-
-    for i in range(0, len(saved_tickers), BATCH_SIZE):
-        batch = saved_tickers[i:i + BATCH_SIZE]
-        log_memory(f"BATCH {i // BATCH_SIZE + 1}")
-
-        for ticker in batch:
-            result = fetch_single_ticker(ticker)
-            # Immediately slim for response
-            all_stocks_slim[ticker] = {
-                "name": result.get("name", ticker),
-                "change_pct": result.get("change_pct", 0),
-            }
-            if "error" in result:
-                all_stocks_slim[ticker]["error"] = result["error"]
-
-            # Check if filtered
-            if abs(result.get("change_pct", 0)) >= 5.0:
-                filtered_list.append((ticker, result))
-
-        gc.collect()
-
-    log_memory("AFTER FETCH")
-
-    if not filtered_list:
-        return jsonify({
-            "results": [],
-            "all_stocks": all_stocks_slim,
-            "message": "No stocks with +/- 5% or more change found."
-        })
-
-    # Sort by absolute change
-    filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
-
-    logger.info(f"Processing {len(filtered_list)} filtered stocks")
-
-    # Step 2: Process filtered stocks ONE BY ONE
-    results = []
-    for idx, (ticker, info) in enumerate(filtered_list):
-        log_memory(f"STOCK {idx + 1}/{len(filtered_list)}")
-
-        try:
-            # Fetch articles
-            articles = search_news(ticker, info.get("name", ticker))
-
-            # Analyze
-            analysis = analyze_with_gemini(ticker, info, articles)
-
-            # Keep only top 2 unique articles
-            top_articles = get_top_articles(articles, limit=2)
-
-            results.append({
-                "ticker": ticker,
-                "name": info.get("name", ticker),
-                "change_pct": info["change_pct"],
-                "analysis": analysis,
-                "articles": top_articles,
-                "article_count": len(articles),
-            })
-
-            # Aggressive cleanup
-            del articles
-            del analysis
-        except Exception as e:
-            logger.error(f"Error processing {ticker}: {e}")
-            results.append({
-                "ticker": ticker,
-                "name": info.get("name", ticker),
-                "change_pct": info["change_pct"],
-                "analysis": f"Analysis failed: {str(e)}",
-                "articles": [],
-                "article_count": 0,
-            })
-
-        gc.collect()
-
-    log_memory("DONE")
-
-    return jsonify({
-        "results": results,
-        "all_stocks": all_stocks_slim,
-    })
+    """Legacy non-streaming endpoint."""
+    return jsonify({"error": "Please use streaming endpoint /api/analyze/stream"}), 400
 
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
@@ -276,7 +295,7 @@ def search_news(ticker, company_name):
 
                 articles.append({
                     "title": item.get("title", ""),
-                    "snippet": item.get("snippet", "")[:100],  # Limit snippet
+                    "snippet": item.get("snippet", "")[:100],
                     "link": item.get("link", ""),
                     "date": pub_date,
                 })
@@ -319,7 +338,6 @@ def analyze_with_gemini(ticker, stock_info, articles):
     if not client:
         return "Gemini client initialization failed."
 
-    # Compact prompt with title + snippet (100 chars)
     article_texts = [f"{i}. {a['title']}: {a.get('snippet', '')[:100]}" for i, a in enumerate(articles[:5], 1)]
     articles_block = "\n".join(article_texts)
 
