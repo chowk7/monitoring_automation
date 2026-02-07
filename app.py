@@ -33,8 +33,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 _gemini_client = None
 
 # Batch settings
-FETCH_BATCH_SIZE = 20  # Fetch tickers in batches
-ANALYSIS_BATCH_SIZE = 1  # Analyze 1 stock at a time (sequential)
+FETCH_PARALLEL_WORKERS = 20  # Parallel workers for Yahoo API
+ANALYSIS_BATCH_SIZE = 5  # Analyze 5 stocks in parallel with Gemini
 
 # ─── Default Categories and Tickers ───────────────────────────────────────────
 
@@ -76,27 +76,61 @@ def get_ticker_category(ticker):
     return "기타"
 
 
-# ─── CSV Ticker Management ────────────────────────────────────────────────────
+# ─── Ticker Management (based on DEFAULT_CATEGORIES) ──────────────────────────
+
+# In-memory storage for active tickers (selected from DEFAULT_CATEGORIES)
+_active_tickers = None
+
+
+def get_all_default_tickers():
+    """Get all tickers from DEFAULT_CATEGORIES as dict {ticker: category}."""
+    all_tickers = {}
+    for category, tickers in DEFAULT_CATEGORIES.items():
+        for t in tickers:
+            all_tickers[t.upper()] = category
+    return all_tickers
+
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file. Returns dict {ticker: category}."""
-    tickers = {}
+    """Load active tickers from CSV file. Returns dict {ticker: category}."""
+    global _active_tickers
+    if _active_tickers is not None:
+        return _active_tickers
+
+    all_defaults = get_all_default_tickers()
+
+    # If CSV exists, load only those tickers (filtered from defaults)
     if os.path.exists(TICKERS_CSV_FILE):
+        tickers = {}
         try:
             with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 for row in reader:
                     if row and row[0].strip():
                         ticker = row[0].strip().upper()
-                        category = row[1].strip() if len(row) > 1 and row[1].strip() else get_ticker_category(ticker)
-                        tickers[ticker] = category
+                        # Only include if it's in DEFAULT_CATEGORIES
+                        if ticker in all_defaults:
+                            tickers[ticker] = all_defaults[ticker]
+                        else:
+                            # Allow custom tickers with category
+                            category = row[1].strip() if len(row) > 1 and row[1].strip() else "기타"
+                            tickers[ticker] = category
         except Exception as e:
             logger.error(f"Error reading CSV: {e}")
-    return tickers
+            tickers = all_defaults
+        _active_tickers = tickers
+        return tickers
+    else:
+        # No CSV, use all defaults
+        _active_tickers = all_defaults
+        save_tickers_to_csv(all_defaults)
+        return all_defaults
 
 
 def save_tickers_to_csv(tickers_dict):
-    """Save tickers to CSV file. Expects dict {ticker: category}."""
+    """Save active tickers to CSV file. Expects dict {ticker: category}."""
+    global _active_tickers
+    _active_tickers = tickers_dict
     try:
         with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
@@ -122,16 +156,22 @@ def health_check():
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
     tickers_dict = load_tickers_from_csv()
+    all_defaults = get_all_default_tickers()
     # Return as list for frontend compatibility, with category info
     tickers_list = [{"ticker": t, "category": c} for t, c in tickers_dict.items()]
-    return jsonify({"tickers": tickers_list, "categories": list(DEFAULT_CATEGORIES.keys())})
+    # Also return all available defaults for selection
+    return jsonify({
+        "tickers": tickers_list,
+        "categories": list(DEFAULT_CATEGORIES.keys()),
+        "all_defaults": DEFAULT_CATEGORIES,
+    })
 
 
 @app.route("/api/tickers", methods=["POST"])
 def add_ticker():
     data = request.get_json()
     ticker = data.get("ticker", "").strip().upper()
-    category = data.get("category", "").strip() or "기타"
+    category = data.get("category", "").strip()
 
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
@@ -139,6 +179,13 @@ def add_ticker():
     tickers_dict = load_tickers_from_csv()
     if ticker in tickers_dict:
         return jsonify({"error": f"{ticker} is already added"}), 400
+
+    # Check if ticker is in defaults, use that category if so
+    all_defaults = get_all_default_tickers()
+    if ticker in all_defaults:
+        category = all_defaults[ticker]
+    elif not category:
+        category = "기타"
 
     tickers_dict[ticker] = category
     save_tickers_to_csv(tickers_dict)
@@ -226,23 +273,22 @@ def analyze_stream():
     def generate():
         log_memory("STREAM START")
 
-        # Phase 1: Fetch all stock data in batches
+        # Phase 1: Fetch all stock data in PARALLEL
         all_stocks_slim = {}
         filtered_list = []
 
-        total_batches = (len(ticker_list) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
+        yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({len(ticker_list)}개 종목 병렬 수집)'})}\n\n"
 
-        for batch_idx in range(0, len(ticker_list), FETCH_BATCH_SIZE):
-            batch = ticker_list[batch_idx:batch_idx + FETCH_BATCH_SIZE]
-            batch_num = batch_idx // FETCH_BATCH_SIZE + 1
+        def fetch_with_category(ticker):
+            result = fetch_single_ticker(ticker)
+            category = tickers_dict.get(ticker, get_ticker_category(ticker))
+            return ticker, result, category
 
-            # Send progress
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
-
-            for ticker in batch:
-                result = fetch_single_ticker(ticker)
-                # Use category from CSV, fallback to default
-                category = tickers_dict.get(ticker, get_ticker_category(ticker))
+        # Parallel fetch all tickers at once
+        with ThreadPoolExecutor(max_workers=FETCH_PARALLEL_WORKERS) as executor:
+            futures = {executor.submit(fetch_with_category, t): t for t in ticker_list}
+            for future in as_completed(futures):
+                ticker, result, category = future.result()
                 change_pct = result.get("change_pct", 0)
 
                 all_stocks_slim[ticker] = {
@@ -261,7 +307,7 @@ def analyze_stream():
                         "date": result.get("date", ""),
                     }, category))
 
-            gc.collect()
+        gc.collect()
 
         # Calculate category stats
         category_stats = {}
@@ -299,17 +345,15 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks one by one using Gemini
+        # Phase 2: Analyze filtered stocks in parallel batches (5 at a time)
         total_stocks = len(filtered_list)
+        total_batches = (total_stocks + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
 
-        for idx, (ticker, info, category) in enumerate(filtered_list):
-            stock_num = idx + 1
-
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({stock_num}/{total_stocks})'})}\n\n"
-
+        def analyze_stock(item):
+            ticker, info, category = item
             try:
                 result = analyze_with_gemini(ticker, info)
-                stock_result = {
+                return {
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -319,7 +363,7 @@ def analyze_stream():
                 }
             except Exception as e:
                 logger.error(f"Error processing {ticker}: {e}")
-                stock_result = {
+                return {
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -328,11 +372,25 @@ def analyze_stream():
                     "sources": [],
                 }
 
-            # Send result immediately
-            yield f"data: {json.dumps({'type': 'results', 'results': [stock_result]})}\n\n"
+        for batch_idx in range(0, total_stocks, ANALYSIS_BATCH_SIZE):
+            batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
+            batch_num = batch_idx // ANALYSIS_BATCH_SIZE + 1
 
-            # Clean up after each analysis
-            del stock_result
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_batches})'})}\n\n"
+
+            # Process batch in parallel
+            batch_results = []
+            with ThreadPoolExecutor(max_workers=ANALYSIS_BATCH_SIZE) as executor:
+                futures = [executor.submit(analyze_stock, item) for item in batch]
+                for future in as_completed(futures):
+                    batch_results.append(future.result())
+
+            # Sort by change_pct
+            batch_results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+
+            # Send batch results
+            yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
+
             gc.collect()
 
         log_memory("STREAM DONE")
@@ -404,7 +462,7 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro to analyze stock price movement (no grounding for memory optimization)."""
+    """Use Gemini 2.5 Pro with Google Search grounding to analyze stock price movement."""
     if not GEMINI_API_KEY:
         return {"analysis": "Gemini API key not configured.", "sources": []}
 
@@ -422,22 +480,47 @@ def analyze_with_gemini(ticker, stock_info):
 변동: {change_pct:+.1f}%
 날짜: {trade_date}
 
-규칙:
-1. 한글 1-2문장으로 간결하게 (명사형 종결)
-2. 종목명/변동률 출력 금지
-3. 개별 이슈 없으면: "개별이슈 미발견. 시장 흐름에 따른 변동 추정."
-4. 예시: "AI 반도체 수요 증가 기대감으로 상승"
+출력 형식:
+1. 한글로 2문장 이내로 자세히 분석 (명사형 종결)
+2. 종목명/변동률은 출력하지 마라
+3. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
+4. 한글 분석 후 줄바꿈하고 영어로 같은 내용을 1-2문장으로 작성
+
+예시 출력:
+AI 반도체 수요 급증에 대한 기대감과 함께 주요 고객사의 대규모 주문 소식이 전해지며 상승. 특히 데이터센터용 GPU 수요가 크게 증가한 것으로 분석됨.
+Rising expectations for AI semiconductor demand surge, along with news of major customer orders. Particularly driven by significant increase in datacenter GPU demand.
 """
 
     try:
-        # Simple API call without grounding (reduces memory usage)
+        from google.genai import types
+
+        # API call with Google Search grounding for source links
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
         )
 
         analysis_text = response.text if response.text else "분석 결과 없음"
-        return {"analysis": analysis_text, "sources": []}
+
+        # Extract grounding sources (up to 3)
+        sources = []
+        try:
+            if response.candidates and response.candidates[0].grounding_metadata:
+                grounding = response.candidates[0].grounding_metadata
+                if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
+                    for chunk in grounding.grounding_chunks[:3]:
+                        if hasattr(chunk, 'web') and chunk.web:
+                            sources.append({
+                                "title": getattr(chunk.web, 'title', '') or '',
+                                "url": getattr(chunk.web, 'uri', '') or '',
+                            })
+        except Exception:
+            pass
+
+        return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
 
