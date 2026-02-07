@@ -4,6 +4,7 @@ import csv
 import json
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
@@ -31,9 +32,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
-# Batch settings - reduced for 512MB memory limit
-FETCH_BATCH_SIZE = 10  # Fetch tickers in smaller batches
-ANALYSIS_BATCH_SIZE = 1  # Analyze one stock at a time to minimize memory
+# Batch settings
+FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
+ANALYSIS_BATCH_SIZE = 3  # Analyze 3 stocks in parallel
 
 # ─── Default Categories and Tickers ───────────────────────────────────────────
 
@@ -239,25 +240,22 @@ def analyze_stream():
                 change_pct = result.get("change_pct", 0)
 
                 all_stocks_slim[ticker] = {
-                    "name": result.get("name", ticker)[:50],
+                    "name": result.get("name", ticker),
                     "change_pct": change_pct,
                     "category": category,
                 }
                 if "error" in result:
-                    all_stocks_slim[ticker]["error"] = result["error"][:100]
+                    all_stocks_slim[ticker]["error"] = result["error"]
 
                 # Only keep minimal data for filtered stocks
                 if abs(change_pct) >= 5.0:
                     filtered_list.append((ticker, {
-                        "name": result.get("name", ticker)[:50],
+                        "name": result.get("name", ticker),
                         "change_pct": change_pct,
                         "date": result.get("date", ""),
                     }, category))
 
-                del result
-
             gc.collect()
-            log_memory(f"FETCH BATCH {batch_num}")
 
         # Calculate category stats
         category_stats = {}
@@ -295,8 +293,32 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks in batches using Gemini
+        # Phase 2: Analyze filtered stocks in parallel batches using Gemini
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
+
+        def analyze_stock(item):
+            """Worker function for parallel analysis."""
+            ticker, info, category = item
+            try:
+                result = analyze_with_gemini(ticker, info)
+                return {
+                    "ticker": ticker,
+                    "name": info.get("name", ticker),
+                    "change_pct": info["change_pct"],
+                    "category": category,
+                    "analysis": result["analysis"],
+                    "sources": result.get("sources", []),
+                }
+            except Exception as e:
+                logger.error(f"Error processing {ticker}: {e}")
+                return {
+                    "ticker": ticker,
+                    "name": info.get("name", ticker),
+                    "change_pct": info["change_pct"],
+                    "category": category,
+                    "analysis": f"Analysis failed: {str(e)}",
+                    "sources": [],
+                }
 
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
             batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
@@ -306,38 +328,20 @@ def analyze_stream():
 
             yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
 
+            # Process batch in parallel using ThreadPoolExecutor
             batch_results = []
-            for ticker, info, category in batch:
-                try:
-                    result = analyze_with_gemini(ticker, info)
+            with ThreadPoolExecutor(max_workers=ANALYSIS_BATCH_SIZE) as executor:
+                futures = {executor.submit(analyze_stock, item): item[0] for item in batch}
+                for future in as_completed(futures):
+                    result = future.result()
+                    batch_results.append(result)
 
-                    batch_results.append({
-                        "ticker": ticker,
-                        "name": info.get("name", ticker),
-                        "change_pct": info["change_pct"],
-                        "category": category,
-                        "analysis": result["analysis"],
-                        "sources": result.get("sources", []),
-                    })
-
-                except Exception as e:
-                    logger.error(f"Error processing {ticker}: {e}")
-                    batch_results.append({
-                        "ticker": ticker,
-                        "name": info.get("name", ticker),
-                        "change_pct": info["change_pct"],
-                        "category": category,
-                        "analysis": f"Analysis failed: {str(e)}",
-                        "sources": [],
-                    })
-
-                gc.collect()
+            # Sort by change_pct to maintain order
+            batch_results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
 
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
 
-            # Clear batch data
-            del batch_results
             gc.collect()
 
         log_memory("STREAM DONE")
@@ -380,32 +384,20 @@ def fetch_single_ticker(ticker_symbol):
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
-        # Get last 2 valid closes only
-        valid_closes = []
-        valid_ts = []
-        for i in range(len(closes) - 1, -1, -1):
-            if closes[i] is not None:
-                valid_closes.insert(0, closes[i])
-                valid_ts.insert(0, timestamps[i])
-                if len(valid_closes) >= 2:
-                    break
+        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        if len(valid_closes) < 2:
+        if len(valid) < 2:
             return {
-                "error": "Insufficient data",
+                "error": f"Insufficient data (rows={len(valid)})",
                 "change_pct": 0,
                 "name": ticker_symbol,
             }
 
-        prev_close = valid_closes[-2]
-        last_close = valid_closes[-1]
+        prev_close = valid[-2][1]
+        last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid_ts[-1]).date()
-        name = meta.get("shortName", ticker_symbol)[:50]  # Limit name length
-
-        # Clear large objects
-        del data, result, closes, timestamps
-        gc.collect()
+        last_date = datetime.fromtimestamp(valid[-1][0]).date()
+        name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
             "name": name,
@@ -413,7 +405,6 @@ def fetch_single_ticker(ticker_symbol):
             "date": str(last_date),
         }
     except Exception as e:
-        gc.collect()
         return {
             "error": str(e),
             "change_pct": 0,
@@ -422,7 +413,7 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.0 Flash with Google Search grounding to analyze stock price movement."""
+    """Use Gemini 2.5 Pro with Google Search grounding to analyze stock price movement."""
     if not GEMINI_API_KEY:
         return {"analysis": "Gemini API key not configured.", "sources": []}
 
@@ -450,11 +441,8 @@ def analyze_with_gemini(ticker, stock_info):
     try:
         from google.genai import types
 
-        log_memory(f"GEMINI BEFORE {ticker}")
-
-        # Use gemini-2.0-flash for lower memory usage
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-pro",
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -463,7 +451,7 @@ def analyze_with_gemini(ticker, stock_info):
 
         analysis_text = response.text if response.text else "분석 결과 없음"
 
-        # Extract grounding sources (up to 3) - minimal processing
+        # Extract grounding sources (up to 3)
         sources = []
         try:
             if response.candidates and response.candidates[0].grounding_metadata:
@@ -476,17 +464,10 @@ def analyze_with_gemini(ticker, stock_info):
                                 "url": getattr(chunk.web, 'uri', '') or '',
                             })
         except Exception:
-            pass  # Silently ignore grounding errors
-
-        # Explicitly delete response to free memory
-        del response
-        gc.collect()
-
-        log_memory(f"GEMINI AFTER {ticker}")
+            pass
 
         return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
-        gc.collect()
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
 
 
