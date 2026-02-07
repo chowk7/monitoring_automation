@@ -33,7 +33,7 @@ _gemini_client = None
 
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
-ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
+ANALYSIS_BATCH_SIZE = 1  # Analyze one stock at a time to minimize memory
 
 # ─── Default Categories and Tickers ───────────────────────────────────────────
 
@@ -78,27 +78,29 @@ def get_ticker_category(ticker):
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file."""
-    tickers = []
+    """Load tickers from CSV file. Returns dict {ticker: category}."""
+    tickers = {}
     if os.path.exists(TICKERS_CSV_FILE):
         try:
             with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
                 for row in reader:
                     if row and row[0].strip():
-                        tickers.append(row[0].strip().upper())
+                        ticker = row[0].strip().upper()
+                        category = row[1].strip() if len(row) > 1 and row[1].strip() else get_ticker_category(ticker)
+                        tickers[ticker] = category
         except Exception as e:
             logger.error(f"Error reading CSV: {e}")
     return tickers
 
 
-def save_tickers_to_csv(tickers):
-    """Save tickers to CSV file."""
+def save_tickers_to_csv(tickers_dict):
+    """Save tickers to CSV file. Expects dict {ticker: category}."""
     try:
         with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            for ticker in tickers:
-                writer.writerow([ticker])
+            for ticker, category in tickers_dict.items():
+                writer.writerow([ticker, category])
     except Exception as e:
         logger.error(f"Error writing CSV: {e}")
 
@@ -112,34 +114,42 @@ def index():
 
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
-    tickers = load_tickers_from_csv()
-    return jsonify({"tickers": tickers})
+    tickers_dict = load_tickers_from_csv()
+    # Return as list for frontend compatibility, with category info
+    tickers_list = [{"ticker": t, "category": c} for t, c in tickers_dict.items()]
+    return jsonify({"tickers": tickers_list, "categories": list(DEFAULT_CATEGORIES.keys())})
 
 
 @app.route("/api/tickers", methods=["POST"])
 def add_ticker():
     data = request.get_json()
     ticker = data.get("ticker", "").strip().upper()
+    category = data.get("category", "").strip() or "기타"
+
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
+    tickers_dict = load_tickers_from_csv()
+    if ticker in tickers_dict:
         return jsonify({"error": f"{ticker} is already added"}), 400
 
-    tickers.append(ticker)
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    tickers_dict[ticker] = category
+    save_tickers_to_csv(tickers_dict)
+
+    tickers_list = [{"ticker": t, "category": c} for t, c in tickers_dict.items()]
+    return jsonify({"tickers": tickers_list})
 
 
 @app.route("/api/tickers/<ticker>", methods=["DELETE"])
 def delete_ticker(ticker):
     ticker = ticker.upper()
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
-        tickers.remove(ticker)
-        save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    tickers_dict = load_tickers_from_csv()
+    if ticker in tickers_dict:
+        del tickers_dict[ticker]
+        save_tickers_to_csv(tickers_dict)
+
+    tickers_list = [{"ticker": t, "category": c} for t, c in tickers_dict.items()]
+    return jsonify({"tickers": tickers_list})
 
 
 @app.route("/api/tickers/bulk", methods=["POST"])
@@ -147,42 +157,45 @@ def bulk_add_tickers():
     """Add multiple tickers at once (from CSV upload or text input)."""
     data = request.get_json()
     new_tickers = data.get("tickers", [])
+    category = data.get("category", "").strip() or "기타"
 
     if not new_tickers:
         return jsonify({"error": "No tickers provided"}), 400
 
-    tickers = load_tickers_from_csv()
+    tickers_dict = load_tickers_from_csv()
     added = []
     for t in new_tickers:
         t = t.strip().upper()
-        if t and t not in tickers:
-            tickers.append(t)
+        if t and t not in tickers_dict:
+            tickers_dict[t] = category
             added.append(t)
 
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers, "added": added, "added_count": len(added)})
+    save_tickers_to_csv(tickers_dict)
+    tickers_list = [{"ticker": t, "category": c} for t, c in tickers_dict.items()]
+    return jsonify({"tickers": tickers_list, "added": added, "added_count": len(added)})
 
 
 @app.route("/api/tickers/clear", methods=["DELETE"])
 def clear_tickers():
     """Clear all tickers."""
-    save_tickers_to_csv([])
+    save_tickers_to_csv({})
     return jsonify({"tickers": [], "message": "All tickers cleared"})
 
 
 @app.route("/api/tickers/defaults", methods=["POST"])
 def load_default_tickers():
     """Load all default tickers from categories."""
-    all_tickers = []
+    all_tickers = {}
     for category, tickers in DEFAULT_CATEGORIES.items():
         for t in tickers:
             t_upper = t.upper()
             if t_upper not in all_tickers:
-                all_tickers.append(t_upper)
+                all_tickers[t_upper] = category
 
     save_tickers_to_csv(all_tickers)
+    tickers_list = [{"ticker": t, "category": c} for t, c in all_tickers.items()]
     return jsonify({
-        "tickers": all_tickers,
+        "tickers": tickers_list,
         "count": len(all_tickers),
         "categories": list(DEFAULT_CATEGORIES.keys()),
     })
@@ -197,9 +210,11 @@ def get_categories():
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
-    tickers = load_tickers_from_csv()
-    if not tickers:
+    tickers_dict = load_tickers_from_csv()
+    if not tickers_dict:
         return jsonify({"error": "No tickers saved."}), 400
+
+    ticker_list = list(tickers_dict.keys())
 
     def generate():
         log_memory("STREAM START")
@@ -208,10 +223,10 @@ def analyze_stream():
         all_stocks_slim = {}
         filtered_list = []
 
-        total_batches = (len(tickers) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
+        total_batches = (len(ticker_list) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
 
-        for batch_idx in range(0, len(tickers), FETCH_BATCH_SIZE):
-            batch = tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
+        for batch_idx in range(0, len(ticker_list), FETCH_BATCH_SIZE):
+            batch = ticker_list[batch_idx:batch_idx + FETCH_BATCH_SIZE]
             batch_num = batch_idx // FETCH_BATCH_SIZE + 1
 
             # Send progress
@@ -219,7 +234,8 @@ def analyze_stream():
 
             for ticker in batch:
                 result = fetch_single_ticker(ticker)
-                category = get_ticker_category(ticker)
+                # Use category from CSV, fallback to default
+                category = tickers_dict.get(ticker, get_ticker_category(ticker))
                 all_stocks_slim[ticker] = {
                     "name": result.get("name", ticker),
                     "change_pct": result.get("change_pct", 0),

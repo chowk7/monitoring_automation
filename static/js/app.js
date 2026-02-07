@@ -1,5 +1,6 @@
 document.addEventListener("DOMContentLoaded", () => {
     const tickerInput = document.getElementById("tickerInput");
+    const categorySelect = document.getElementById("categorySelect");
     const addBtn = document.getElementById("addBtn");
     const clearAllBtn = document.getElementById("clearAllBtn");
     const loadDefaultsBtn = document.getElementById("loadDefaultsBtn");
@@ -44,9 +45,19 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/tickers");
             const data = await resp.json();
             renderTickers(data.tickers);
+            // Populate category select if available
+            if (data.categories && categorySelect) {
+                populateCategorySelect(data.categories);
+            }
         } catch (err) {
             console.error("Failed to load tickers:", err);
         }
+    }
+
+    function populateCategorySelect(categories) {
+        categorySelect.innerHTML = categories.map(cat =>
+            `<option value="${escapeHtml(cat)}">${escapeHtml(cat)}</option>`
+        ).join("");
     }
 
     async function loadDefaultTickers() {
@@ -55,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await resp.json();
             if (resp.ok) {
                 renderTickers(data.tickers);
-                showSuccess(`${data.count}개 기본 종목 로드됨 (${data.categories.join(", ")})`);
+                showSuccess(`${data.count}개 기본 종목 로드됨`);
             } else {
                 showError(data.error || "Failed to load default tickers");
             }
@@ -68,6 +79,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const raw = tickerInput.value.trim();
         if (!raw) return;
 
+        const category = categorySelect ? categorySelect.value : "기타";
+
         // Support comma-separated, space-separated, or newline-separated input
         const tickers = raw.split(/[,\s\n]+/).map(t => t.trim()).filter(Boolean);
 
@@ -77,13 +90,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 const resp = await fetch("/api/tickers/bulk", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ tickers }),
+                    body: JSON.stringify({ tickers, category }),
                 });
                 const data = await resp.json();
                 if (resp.ok) {
                     renderTickers(data.tickers);
                     if (data.added_count > 0) {
-                        showSuccess(`${data.added_count}개 종목 추가됨`);
+                        showSuccess(`${data.added_count}개 종목 추가됨 (${category})`);
                     }
                 } else {
                     showError(data.error || "Failed to add tickers");
@@ -97,7 +110,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const resp = await fetch("/api/tickers", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ticker: tickers[0] }),
+                    body: JSON.stringify({ ticker: tickers[0], category }),
                 });
                 const data = await resp.json();
                 if (resp.ok) {
@@ -138,23 +151,42 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderTickers(tickers) {
-        tickerCount.textContent = tickers.length;
-        analyzeBtn.disabled = tickers.length === 0;
+        // tickers is now array of {ticker, category}
+        const tickerArray = Array.isArray(tickers) ? tickers : [];
+        tickerCount.textContent = tickerArray.length;
+        analyzeBtn.disabled = tickerArray.length === 0;
 
-        if (tickers.length === 0) {
+        if (tickerArray.length === 0) {
             tickerList.innerHTML = '<p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>';
             return;
         }
 
-        tickerList.innerHTML = tickers.map(t => `
-            <span class="ticker-tag">
-                ${escapeHtml(t)}
-                <button class="remove-btn" data-ticker="${escapeHtml(t)}" title="Remove">&times;</button>
-            </span>
-        `).join("");
+        // Group by category
+        const byCategory = {};
+        for (const item of tickerArray) {
+            const cat = item.category || "기타";
+            if (!byCategory[cat]) byCategory[cat] = [];
+            byCategory[cat].push(item.ticker);
+        }
+
+        let html = "";
+        for (const [cat, tickerList] of Object.entries(byCategory)) {
+            html += `<div class="ticker-category-group">`;
+            html += `<div class="ticker-category-label">${escapeHtml(cat)}</div>`;
+            html += `<div class="ticker-category-items">`;
+            html += tickerList.map(t => `
+                <span class="ticker-tag">
+                    ${escapeHtml(t)}
+                    <button class="remove-btn" data-ticker="${escapeHtml(t)}" title="Remove">&times;</button>
+                </span>
+            `).join("");
+            html += `</div></div>`;
+        }
+
+        document.getElementById("tickerList").innerHTML = html;
 
         // Bind remove buttons
-        tickerList.querySelectorAll(".remove-btn").forEach(btn => {
+        document.getElementById("tickerList").querySelectorAll(".remove-btn").forEach(btn => {
             btn.addEventListener("click", () => removeTicker(btn.dataset.ticker));
         });
     }
@@ -305,6 +337,29 @@ document.addEventListener("DOMContentLoaded", () => {
             overviewHtml += `<div class="category-group"><h4>${escapeHtml(cat)}</h4><div class="overview-grid">`;
 
             for (const stock of stocks) {
+                if (stock.error && stock.change_pct === 0) {
+                    overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(stock.error)}">${escapeHtml(stock.ticker)} (오류)</div>`;
+                    continue;
+                }
+                const cls = stock.change_pct > 0 ? "positive" : stock.change_pct < 0 ? "negative" : "neutral";
+                const filtered = Math.abs(stock.change_pct) >= 5 ? " filtered" : "";
+                const sign = stock.change_pct > 0 ? "+" : "";
+                const displayName = stock.name || stock.ticker;
+                overviewHtml += `<div class="overview-item ${cls}${filtered}">${escapeHtml(displayName)} ${sign}${stock.change_pct.toFixed(1)}%</div>`;
+            }
+
+            overviewHtml += "</div></div>";
+        }
+
+        // Add any other categories not in the order
+        for (const [cat, stocks] of Object.entries(byCategory)) {
+            if (categoryOrder.includes(cat)) continue;
+
+            const sortedStocks = stocks.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+
+            overviewHtml += `<div class="category-group"><h4>${escapeHtml(cat)}</h4><div class="overview-grid">`;
+
+            for (const stock of sortedStocks) {
                 if (stock.error && stock.change_pct === 0) {
                     overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(stock.error)}">${escapeHtml(stock.ticker)} (오류)</div>`;
                     continue;
