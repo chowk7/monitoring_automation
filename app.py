@@ -31,8 +31,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
-# Batch settings
-FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
+# Batch settings - reduced for 512MB memory limit
+FETCH_BATCH_SIZE = 10  # Fetch tickers in smaller batches
 ANALYSIS_BATCH_SIZE = 1  # Analyze one stock at a time to minimize memory
 
 # ─── Default Categories and Tickers ───────────────────────────────────────────
@@ -236,18 +236,28 @@ def analyze_stream():
                 result = fetch_single_ticker(ticker)
                 # Use category from CSV, fallback to default
                 category = tickers_dict.get(ticker, get_ticker_category(ticker))
+                change_pct = result.get("change_pct", 0)
+
                 all_stocks_slim[ticker] = {
-                    "name": result.get("name", ticker),
-                    "change_pct": result.get("change_pct", 0),
+                    "name": result.get("name", ticker)[:50],
+                    "change_pct": change_pct,
                     "category": category,
                 }
                 if "error" in result:
-                    all_stocks_slim[ticker]["error"] = result["error"]
+                    all_stocks_slim[ticker]["error"] = result["error"][:100]
 
-                if abs(result.get("change_pct", 0)) >= 5.0:
-                    filtered_list.append((ticker, result, category))
+                # Only keep minimal data for filtered stocks
+                if abs(change_pct) >= 5.0:
+                    filtered_list.append((ticker, {
+                        "name": result.get("name", ticker)[:50],
+                        "change_pct": change_pct,
+                        "date": result.get("date", ""),
+                    }, category))
+
+                del result
 
             gc.collect()
+            log_memory(f"FETCH BATCH {batch_num}")
 
         # Calculate category stats
         category_stats = {}
@@ -370,20 +380,32 @@ def fetch_single_ticker(ticker_symbol):
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
-        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+        # Get last 2 valid closes only
+        valid_closes = []
+        valid_ts = []
+        for i in range(len(closes) - 1, -1, -1):
+            if closes[i] is not None:
+                valid_closes.insert(0, closes[i])
+                valid_ts.insert(0, timestamps[i])
+                if len(valid_closes) >= 2:
+                    break
 
-        if len(valid) < 2:
+        if len(valid_closes) < 2:
             return {
-                "error": f"Insufficient data (rows={len(valid)})",
+                "error": "Insufficient data",
                 "change_pct": 0,
                 "name": ticker_symbol,
             }
 
-        prev_close = valid[-2][1]
-        last_close = valid[-1][1]
+        prev_close = valid_closes[-2]
+        last_close = valid_closes[-1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0]).date()
-        name = meta.get("shortName", meta.get("longName", ticker_symbol))
+        last_date = datetime.fromtimestamp(valid_ts[-1]).date()
+        name = meta.get("shortName", ticker_symbol)[:50]  # Limit name length
+
+        # Clear large objects
+        del data, result, closes, timestamps
+        gc.collect()
 
         return {
             "name": name,
@@ -391,6 +413,7 @@ def fetch_single_ticker(ticker_symbol):
             "date": str(last_date),
         }
     except Exception as e:
+        gc.collect()
         return {
             "error": str(e),
             "change_pct": 0,
@@ -399,7 +422,7 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro with Google Search grounding to analyze stock price movement."""
+    """Use Gemini 2.0 Flash with Google Search grounding to analyze stock price movement."""
     if not GEMINI_API_KEY:
         return {"analysis": "Gemini API key not configured.", "sources": []}
 
@@ -411,77 +434,59 @@ def analyze_with_gemini(ticker, stock_info):
     change_pct = stock_info["change_pct"]
     trade_date = stock_info.get("date", "")
 
-    prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause.
+    prompt = f"""주식 분석가로서 다음 종목의 주가 변동 원인을 분석하라.
 
-Stock: {name} ({ticker})
-Change: {change_pct:+.1f}%
-Date: {trade_date}
+종목: {name} ({ticker})
+변동: {change_pct:+.1f}%
+날짜: {trade_date}
 
-Instructions:
-1. 출력은 한글로 해라.
-2. 한글로 1-2문장으로 간결하게 원인을 분석해라. (명사형 종결)
-3. 종목명이나 변동률은 출력하지 마라.
-4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
-5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
-6. 한글 분석 후 영어로 한 문장 요약 추가.
+규칙:
+1. 한글 1-2문장으로 간결하게 (명사형 종결)
+2. 종목명/변동률 출력 금지
+3. 개별 이슈 없으면: "개별이슈 미발견. 시장 흐름에 따른 변동 추정."
+4. 예시: "AI 반도체 수요 증가 기대감으로 상승"
 """
 
     try:
-        # Enable Google Search grounding
         from google.genai import types
 
+        log_memory(f"GEMINI BEFORE {ticker}")
+
+        # Use gemini-2.0-flash for lower memory usage
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model="gemini-2.0-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
         )
 
-        analysis_text = response.text
+        analysis_text = response.text if response.text else "분석 결과 없음"
 
-        # Extract grounding sources (up to 3)
+        # Extract grounding sources (up to 3) - minimal processing
         sources = []
         try:
-            if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                logger.info(f"[GROUNDING] Candidate attrs: {dir(candidate)}")
+            if response.candidates and response.candidates[0].grounding_metadata:
+                grounding = response.candidates[0].grounding_metadata
+                if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
+                    for chunk in grounding.grounding_chunks[:3]:
+                        if hasattr(chunk, 'web') and chunk.web:
+                            sources.append({
+                                "title": getattr(chunk.web, 'title', '') or '',
+                                "url": getattr(chunk.web, 'uri', '') or '',
+                            })
+        except Exception:
+            pass  # Silently ignore grounding errors
 
-                if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                    grounding = candidate.grounding_metadata
-                    logger.info(f"[GROUNDING] Grounding metadata attrs: {dir(grounding)}")
+        # Explicitly delete response to free memory
+        del response
+        gc.collect()
 
-                    # Try grounding_chunks
-                    if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                        for chunk in grounding.grounding_chunks[:3]:
-                            if hasattr(chunk, 'web') and chunk.web:
-                                sources.append({
-                                    "title": getattr(chunk.web, 'title', ''),
-                                    "url": getattr(chunk.web, 'uri', ''),
-                                })
+        log_memory(f"GEMINI AFTER {ticker}")
 
-                    # Try search_entry_point if no chunks
-                    if not sources and hasattr(grounding, 'search_entry_point'):
-                        sep = grounding.search_entry_point
-                        if hasattr(sep, 'rendered_content'):
-                            logger.info(f"[GROUNDING] Search entry point found")
-
-                    # Try grounding_supports
-                    if not sources and hasattr(grounding, 'grounding_supports'):
-                        for support in grounding.grounding_supports[:3]:
-                            if hasattr(support, 'grounding_chunk_indices'):
-                                logger.info(f"[GROUNDING] Support chunk indices: {support.grounding_chunk_indices}")
-
-                    # Try web_search_queries
-                    if hasattr(grounding, 'web_search_queries'):
-                        logger.info(f"[GROUNDING] Web search queries: {grounding.web_search_queries}")
-
-        except Exception as e:
-            logger.error(f"[GROUNDING] Error extracting sources: {e}")
-
-        logger.info(f"[GROUNDING] Final sources count: {len(sources)}")
         return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
+        gc.collect()
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
 
 
