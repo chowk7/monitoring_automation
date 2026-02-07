@@ -336,7 +336,7 @@ Instructions:
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-pro-preview-05-06",
+            model="gemini-2.5-pro",
             contents=prompt,
         )
         return response.text
