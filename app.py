@@ -113,6 +113,12 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/health")
+def health_check():
+    """Health check endpoint for Cloud Run."""
+    return jsonify({"status": "healthy"}), 200
+
+
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
     tickers_dict = load_tickers_from_csv()
