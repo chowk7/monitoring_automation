@@ -33,8 +33,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 _gemini_client = None
 
 # Batch settings
-FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
-ANALYSIS_BATCH_SIZE = 3  # Analyze 3 stocks in parallel
+FETCH_BATCH_SIZE = 20  # Fetch tickers in batches
+ANALYSIS_BATCH_SIZE = 1  # Analyze 1 stock at a time (sequential)
 
 # ─── Default Categories and Tickers ───────────────────────────────────────────
 
@@ -293,15 +293,17 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks in parallel batches using Gemini
-        total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
+        # Phase 2: Analyze filtered stocks one by one using Gemini
+        total_stocks = len(filtered_list)
 
-        def analyze_stock(item):
-            """Worker function for parallel analysis."""
-            ticker, info, category = item
+        for idx, (ticker, info, category) in enumerate(filtered_list):
+            stock_num = idx + 1
+
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({stock_num}/{total_stocks})'})}\n\n"
+
             try:
                 result = analyze_with_gemini(ticker, info)
-                return {
+                stock_result = {
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -311,7 +313,7 @@ def analyze_stream():
                 }
             except Exception as e:
                 logger.error(f"Error processing {ticker}: {e}")
-                return {
+                stock_result = {
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -320,28 +322,11 @@ def analyze_stream():
                     "sources": [],
                 }
 
-        for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
-            batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
-            batch_num = batch_idx // ANALYSIS_BATCH_SIZE + 1
+            # Send result immediately
+            yield f"data: {json.dumps({'type': 'results', 'results': [stock_result]})}\n\n"
 
-            log_memory(f"ANALYSIS BATCH {batch_num}")
-
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
-
-            # Process batch in parallel using ThreadPoolExecutor
-            batch_results = []
-            with ThreadPoolExecutor(max_workers=ANALYSIS_BATCH_SIZE) as executor:
-                futures = {executor.submit(analyze_stock, item): item[0] for item in batch}
-                for future in as_completed(futures):
-                    result = future.result()
-                    batch_results.append(result)
-
-            # Sort by change_pct to maintain order
-            batch_results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
-
-            # Send batch results
-            yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
-
+            # Clean up after each analysis
+            del stock_result
             gc.collect()
 
         log_memory("STREAM DONE")
