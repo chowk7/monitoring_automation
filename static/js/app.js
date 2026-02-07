@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
     const tickerInput = document.getElementById("tickerInput");
     const addBtn = document.getElementById("addBtn");
+    const clearAllBtn = document.getElementById("clearAllBtn");
     const tickerList = document.getElementById("tickerList");
     const tickerCount = document.getElementById("tickerCount");
     const analyzeBtn = document.getElementById("analyzeBtn");
@@ -24,6 +25,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.key === "Enter") addTicker();
     });
 
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener("click", clearAllTickers);
+    }
+
     analyzeBtn.addEventListener("click", runAnalysis);
 
     // ─── Functions ───────────────────────────────────────────────────────
@@ -42,15 +47,36 @@ document.addEventListener("DOMContentLoaded", () => {
         const raw = tickerInput.value.trim();
         if (!raw) return;
 
-        // Support comma-separated input
-        const tickers = raw.split(",").map(t => t.trim()).filter(Boolean);
+        // Support comma-separated, space-separated, or newline-separated input
+        const tickers = raw.split(/[,\s\n]+/).map(t => t.trim()).filter(Boolean);
 
-        for (const ticker of tickers) {
+        if (tickers.length > 1) {
+            // Bulk add
+            try {
+                const resp = await fetch("/api/tickers/bulk", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ tickers }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    renderTickers(data.tickers);
+                    if (data.added_count > 0) {
+                        showSuccess(`${data.added_count}개 종목 추가됨`);
+                    }
+                } else {
+                    showError(data.error || "Failed to add tickers");
+                }
+            } catch (err) {
+                showError("Server error while adding tickers");
+            }
+        } else if (tickers.length === 1) {
+            // Single add
             try {
                 const resp = await fetch("/api/tickers", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ticker }),
+                    body: JSON.stringify({ ticker: tickers[0] }),
                 });
                 const data = await resp.json();
                 if (resp.ok) {
@@ -74,6 +100,19 @@ document.addEventListener("DOMContentLoaded", () => {
             renderTickers(data.tickers);
         } catch (err) {
             showError("Failed to remove ticker");
+        }
+    }
+
+    async function clearAllTickers() {
+        if (!confirm("모든 종목을 삭제하시겠습니까?")) return;
+
+        try {
+            const resp = await fetch("/api/tickers/clear", { method: "DELETE" });
+            const data = await resp.json();
+            renderTickers(data.tickers);
+            showSuccess("모든 종목이 삭제되었습니다.");
+        } catch (err) {
+            showError("Failed to clear tickers");
         }
     }
 
@@ -128,7 +167,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             progressFill.style.width = "30%";
                         } else if (data.message.includes("분석 시작")) {
                             progressFill.style.width = "50%";
-                        } else if (data.message.includes("분석 중")) {
+                        } else if (data.message.includes("분석 중") || data.message.includes("Gemini")) {
                             const match = data.message.match(/\((\d+)\/(\d+)\)/);
                             if (match) {
                                 const current = parseInt(match[1]);
@@ -223,26 +262,14 @@ document.addEventListener("DOMContentLoaded", () => {
             const sign = result.change_pct > 0 ? "+" : "";
             const analysisHtml = formatAnalysis(result.analysis);
 
-            // Build article list HTML
-            let articlesHtml = "";
-            if (result.articles && result.articles.length > 0) {
-                articlesHtml = '<div class="result-articles"><h4>참고 기사</h4><ul>';
-                for (const article of result.articles) {
-                    const dateStr = article.date ? `<span class="article-date">${escapeHtml(article.date)}</span>` : "";
-                    articlesHtml += `<li>${dateStr}<a href="${escapeHtml(article.link)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></li>`;
-                }
-                articlesHtml += "</ul></div>";
-            }
-
             html += `
                 <div class="result-card ${cls}">
                     <div class="result-header">
                         <span class="result-name">${escapeHtml(result.name)}</span>
                         <span class="result-change ${cls}">${sign}${result.change_pct.toFixed(1)}%</span>
-                        <span class="result-meta">${result.article_count}건의 기사 분석</span>
+                        <span class="result-meta">Gemini 2.5 Pro 분석</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
-                    ${articlesHtml}
                 </div>
             `;
         }
@@ -270,7 +297,15 @@ document.addEventListener("DOMContentLoaded", () => {
     function showError(msg) {
         errorSection.style.display = "block";
         errorText.textContent = msg;
+        errorSection.className = "error-section";
         setTimeout(() => { errorSection.style.display = "none"; }, 5000);
+    }
+
+    function showSuccess(msg) {
+        errorSection.style.display = "block";
+        errorText.textContent = msg;
+        errorSection.className = "error-section success";
+        setTimeout(() => { errorSection.style.display = "none"; }, 3000);
     }
 
     function hideError() {
