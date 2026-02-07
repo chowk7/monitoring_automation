@@ -135,6 +135,19 @@ header h1 {
     font-size: 0.85rem;
 }
 
+.btn-clear {
+    padding: 6px 14px;
+    background: transparent;
+    border: 1px solid #ef4444;
+    color: #f87171;
+    font-size: 0.8rem;
+    margin-left: auto;
+}
+
+.btn-clear:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
 /* ─── Ticker List ─────────────────────────────────────────────────────────── */
 .section-header {
     display: flex;
@@ -417,7 +430,7 @@ header h1 {
     color: #a3bfdb;
 }
 
-/* ─── Error ───────────────────────────────────────────────────────────────── */
+/* ─── Error & Success ────────────────────────────────────────────────────── */
 .error-section {
     border-color: #ef4444;
     background: rgba(239, 68, 68, 0.08);
@@ -425,6 +438,15 @@ header h1 {
 
 .error-section p {
     color: #f87171;
+}
+
+.error-section.success {
+    border-color: #10b981;
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.error-section.success p {
+    color: #34d399;
 }
 
 /* ─── Responsive ──────────────────────────────────────────────────────────── */

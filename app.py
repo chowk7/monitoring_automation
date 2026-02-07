@@ -1,8 +1,8 @@
 import os
 import gc
+import csv
 import json
 import logging
-import re
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response
 import requests
@@ -22,12 +22,10 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# In-memory ticker storage
-saved_tickers = []
+# CSV file for ticker storage
+TICKERS_CSV_FILE = "tickers.csv"
 
 # Configuration
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Memory optimization: reuse Gemini client
@@ -53,6 +51,34 @@ def get_gemini_client():
     return _gemini_client
 
 
+# ─── CSV Ticker Management ────────────────────────────────────────────────────
+
+def load_tickers_from_csv():
+    """Load tickers from CSV file."""
+    tickers = []
+    if os.path.exists(TICKERS_CSV_FILE):
+        try:
+            with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if row and row[0].strip():
+                        tickers.append(row[0].strip().upper())
+        except Exception as e:
+            logger.error(f"Error reading CSV: {e}")
+    return tickers
+
+
+def save_tickers_to_csv(tickers):
+    """Save tickers to CSV file."""
+    try:
+        with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            for ticker in tickers:
+                writer.writerow([ticker])
+    except Exception as e:
+        logger.error(f"Error writing CSV: {e}")
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -62,7 +88,8 @@ def index():
 
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
-    return jsonify({"tickers": saved_tickers})
+    tickers = load_tickers_from_csv()
+    return jsonify({"tickers": tickers})
 
 
 @app.route("/api/tickers", methods=["POST"])
@@ -71,24 +98,59 @@ def add_ticker():
     ticker = data.get("ticker", "").strip().upper()
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
-    if ticker in saved_tickers:
+
+    tickers = load_tickers_from_csv()
+    if ticker in tickers:
         return jsonify({"error": f"{ticker} is already added"}), 400
-    saved_tickers.append(ticker)
-    return jsonify({"tickers": saved_tickers})
+
+    tickers.append(ticker)
+    save_tickers_to_csv(tickers)
+    return jsonify({"tickers": tickers})
 
 
 @app.route("/api/tickers/<ticker>", methods=["DELETE"])
 def delete_ticker(ticker):
     ticker = ticker.upper()
-    if ticker in saved_tickers:
-        saved_tickers.remove(ticker)
-    return jsonify({"tickers": saved_tickers})
+    tickers = load_tickers_from_csv()
+    if ticker in tickers:
+        tickers.remove(ticker)
+        save_tickers_to_csv(tickers)
+    return jsonify({"tickers": tickers})
+
+
+@app.route("/api/tickers/bulk", methods=["POST"])
+def bulk_add_tickers():
+    """Add multiple tickers at once (from CSV upload or text input)."""
+    data = request.get_json()
+    new_tickers = data.get("tickers", [])
+
+    if not new_tickers:
+        return jsonify({"error": "No tickers provided"}), 400
+
+    tickers = load_tickers_from_csv()
+    added = []
+    for t in new_tickers:
+        t = t.strip().upper()
+        if t and t not in tickers:
+            tickers.append(t)
+            added.append(t)
+
+    save_tickers_to_csv(tickers)
+    return jsonify({"tickers": tickers, "added": added, "added_count": len(added)})
+
+
+@app.route("/api/tickers/clear", methods=["DELETE"])
+def clear_tickers():
+    """Clear all tickers."""
+    save_tickers_to_csv([])
+    return jsonify({"tickers": [], "message": "All tickers cleared"})
 
 
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
-    if not saved_tickers:
+    tickers = load_tickers_from_csv()
+    if not tickers:
         return jsonify({"error": "No tickers saved."}), 400
 
     def generate():
@@ -98,10 +160,10 @@ def analyze_stream():
         all_stocks_slim = {}
         filtered_list = []
 
-        total_batches = (len(saved_tickers) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
+        total_batches = (len(tickers) + FETCH_BATCH_SIZE - 1) // FETCH_BATCH_SIZE
 
-        for batch_idx in range(0, len(saved_tickers), FETCH_BATCH_SIZE):
-            batch = saved_tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
+        for batch_idx in range(0, len(tickers), FETCH_BATCH_SIZE):
+            batch = tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
             batch_num = batch_idx // FETCH_BATCH_SIZE + 1
 
             # Send progress
@@ -135,9 +197,8 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks in batches
+        # Phase 2: Analyze filtered stocks in batches using Gemini
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
-        is_first_ticker = True
 
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
             batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
@@ -145,45 +206,20 @@ def analyze_stream():
 
             log_memory(f"ANALYSIS BATCH {batch_num}")
 
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
 
             batch_results = []
             for ticker, info in batch:
                 try:
-                    articles = search_news(ticker, info.get("name", ticker))
-
-                    # Log all article URLs for the first ticker only
-                    if is_first_ticker and articles:
-                        logger.info(f"=== First ticker [{ticker}] article URLs ===")
-                        for i, a in enumerate(articles, 1):
-                            logger.info(f"  {i}. {a['link']}")
-                        is_first_ticker = False
-
-                    result = analyze_with_gemini(ticker, info, articles)
-                    analysis = result["analysis"]
-                    used_indices = result["used_indices"]
-
-                    # Get articles that Gemini actually used
-                    selected_articles = []
-                    for idx in used_indices[:2]:
-                        if 0 <= idx < len(articles):
-                            a = articles[idx]
-                            selected_articles.append({
-                                "title": a["title"],
-                                "link": a["link"],
-                                "date": a.get("date", ""),
-                            })
+                    analysis = analyze_with_gemini(ticker, info)
 
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": analysis,
-                        "articles": selected_articles,
-                        "article_count": len(articles),
                     })
 
-                    del articles
                 except Exception as e:
                     logger.error(f"Error processing {ticker}: {e}")
                     batch_results.append({
@@ -191,8 +227,6 @@ def analyze_stream():
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": f"Analysis failed: {str(e)}",
-                        "articles": [],
-                        "article_count": 0,
                     })
 
                 gc.collect()
@@ -272,121 +306,42 @@ def fetch_single_ticker(ticker_symbol):
         }
 
 
-def search_news(ticker, company_name):
-    """Search Google for news - fetches 20 articles (2 API calls)."""
-    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
-        return []
-
-    today = datetime.now()
-    yesterday = today - timedelta(days=1)
-    if yesterday.weekday() == 6:
-        yesterday = yesterday - timedelta(days=2)
-    elif yesterday.weekday() == 5:
-        yesterday = yesterday - timedelta(days=1)
-
-    date_str = yesterday.strftime("%Y-%m-%d")
-    query = f"news {company_name} stock after:{date_str} -quote"
-
-    articles = []
-    # Fetch 20 articles (2 requests of 10 each)
-    for start_idx in [1, 11]:
-        try:
-            params = {
-                "key": GOOGLE_API_KEY,
-                "cx": GOOGLE_CSE_ID,
-                "q": query,
-                "num": 10,
-                "start": start_idx,
-                "dateRestrict": "d1",
-                "sort": "date",
-            }
-            resp = requests.get(
-                "https://www.googleapis.com/customsearch/v1",
-                params=params,
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                for item in data.get("items", []):
-                    metatags = item.get("pagemap", {}).get("metatags", [{}])[0]
-                    pub_date = (
-                        metatags.get("article:published_time", "")
-                        or metatags.get("og:updated_time", "")
-                        or ""
-                    )
-                    if pub_date and "T" in pub_date:
-                        pub_date = pub_date.split("T")[0]
-
-                    articles.append({
-                        "title": item.get("title", ""),
-                        "snippet": item.get("snippet", "")[:100],
-                        "link": item.get("link", ""),
-                        "date": pub_date,
-                    })
-        except Exception:
-            pass
-
-    return articles[:20]
-
-
-def analyze_with_gemini(ticker, stock_info, articles):
-    """Use Gemini API to analyze articles. Returns dict with analysis and used article indices."""
+def analyze_with_gemini(ticker, stock_info):
+    """Use Gemini 2.5 Pro to analyze stock price movement."""
     if not GEMINI_API_KEY:
-        return {"analysis": "Gemini API key not configured.", "used_indices": []}
-
-    if not articles:
-        return {"analysis": "No news articles found for analysis.", "used_indices": []}
+        return "Gemini API key not configured."
 
     client = get_gemini_client()
     if not client:
-        return {"analysis": "Gemini client initialization failed.", "used_indices": []}
-
-    # Use all 20 articles
-    article_texts = [f"{i}. {a['title']}: {a.get('snippet', '')[:100]}" for i, a in enumerate(articles[:20], 1)]
-    articles_block = "\n".join(article_texts)
+        return "Gemini client initialization failed."
 
     name = stock_info.get("name", ticker)
     change_pct = stock_info["change_pct"]
+    trade_date = stock_info.get("date", "")
 
-    prompt = f"""출력은 한글로해라. Based on the news, analyze stock price fluctuation cause.
+    prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause.
 
-Stock: {name} ({ticker}), Change: {change_pct:+.1f}%
-
-News:
-{articles_block}
+Stock: {name} ({ticker})
+Change: {change_pct:+.1f}%
+Date: {trade_date}
 
 Instructions:
-1. One sentence summary (noun ending), max 3 sentences.
-2. No stock names or rate of change.
-3. If no issues: 개별이슈 미발견.
-4. Example: 블랙웰 수요 증가로 AI 관련주 전반 상승
-5. Add English one sentence after Korean.
-6. At the end, add a line: USED_ARTICLES: X, Y (where X and Y are the article numbers you actually used for analysis, pick the 2 most relevant ones)
+1. 출력은 한글로 해라.
+2. 한글로 1-2문장으로 간결하게 원인을 분석해라. (명사형 종결)
+3. 종목명이나 변동률은 출력하지 마라.
+4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
+5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
+6. 한글 분석 후 영어로 한 문장 요약 추가.
 """
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-pro-preview-05-06",
             contents=prompt,
         )
-        response_text = response.text
-
-        # Parse used article indices from response
-        used_indices = []
-        analysis = response_text
-
-        if "USED_ARTICLES:" in response_text:
-            parts = response_text.split("USED_ARTICLES:")
-            analysis = parts[0].strip()
-            if len(parts) > 1:
-                indices_str = parts[1].strip()
-                # Extract numbers from the indices string
-                numbers = re.findall(r'\d+', indices_str)
-                used_indices = [int(n) - 1 for n in numbers[:2] if int(n) <= len(articles)]
-
-        return {"analysis": analysis, "used_indices": used_indices}
+        return response.text
     except Exception as e:
-        return {"analysis": f"Analysis failed: {str(e)}", "used_indices": []}
+        return f"Analysis failed: {str(e)}"
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
