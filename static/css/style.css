@@ -367,6 +367,40 @@ header h1 {
     margin-bottom: 10px;
 }
 
+/* ─── Sources List ───────────────────────────────────────────────────────── */
+.result-sources {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #2a3a4a;
+}
+
+.result-sources h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #7a8a9e;
+    margin-bottom: 8px;
+}
+
+.result-sources ul {
+    list-style: none;
+    padding: 0;
+}
+
+.result-sources li {
+    padding: 4px 0;
+    font-size: 0.82rem;
+}
+
+.result-sources a {
+    color: #7ab3e0;
+    text-decoration: none;
+}
+
+.result-sources a:hover {
+    color: #a3d0f5;
+    text-decoration: underline;
+}
+
 /* ─── Article List ────────────────────────────────────────────────────────── */
 .result-articles {
     margin-top: 16px;

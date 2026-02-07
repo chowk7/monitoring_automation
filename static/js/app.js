@@ -262,6 +262,17 @@ document.addEventListener("DOMContentLoaded", () => {
             const sign = result.change_pct > 0 ? "+" : "";
             const analysisHtml = formatAnalysis(result.analysis);
 
+            // Build sources HTML
+            let sourcesHtml = "";
+            if (result.sources && result.sources.length > 0) {
+                sourcesHtml = '<div class="result-sources"><h4>참고 소스</h4><ul>';
+                for (const source of result.sources) {
+                    const title = source.title || source.url || "링크";
+                    sourcesHtml += `<li><a href="${escapeHtml(source.url)}" target="_blank" rel="noopener">${escapeHtml(title)}</a></li>`;
+                }
+                sourcesHtml += "</ul></div>";
+            }
+
             html += `
                 <div class="result-card ${cls}">
                     <div class="result-header">
@@ -270,6 +281,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span class="result-meta">Gemini 2.5 Pro 분석</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
+                    ${sourcesHtml}
                 </div>
             `;
         }

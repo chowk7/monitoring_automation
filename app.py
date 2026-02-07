@@ -211,13 +211,14 @@ def analyze_stream():
             batch_results = []
             for ticker, info in batch:
                 try:
-                    analysis = analyze_with_gemini(ticker, info)
+                    result = analyze_with_gemini(ticker, info)
 
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
-                        "analysis": analysis,
+                        "analysis": result["analysis"],
+                        "sources": result.get("sources", []),
                     })
 
                 except Exception as e:
@@ -227,6 +228,7 @@ def analyze_stream():
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": f"Analysis failed: {str(e)}",
+                        "sources": [],
                     })
 
                 gc.collect()
@@ -307,13 +309,13 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro to analyze stock price movement."""
+    """Use Gemini 2.5 Pro with Google Search grounding to analyze stock price movement."""
     if not GEMINI_API_KEY:
-        return "Gemini API key not configured."
+        return {"analysis": "Gemini API key not configured.", "sources": []}
 
     client = get_gemini_client()
     if not client:
-        return "Gemini client initialization failed."
+        return {"analysis": "Gemini client initialization failed.", "sources": []}
 
     name = stock_info.get("name", ticker)
     change_pct = stock_info["change_pct"]
@@ -335,13 +337,36 @@ Instructions:
 """
 
     try:
+        # Enable Google Search grounding
+        from google.genai import types
+
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+            ),
         )
-        return response.text
+
+        analysis_text = response.text
+
+        # Extract grounding sources (up to 3)
+        sources = []
+        if hasattr(response, 'candidates') and response.candidates:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                grounding = candidate.grounding_metadata
+                if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
+                    for chunk in grounding.grounding_chunks[:3]:
+                        if hasattr(chunk, 'web') and chunk.web:
+                            sources.append({
+                                "title": getattr(chunk.web, 'title', ''),
+                                "url": getattr(chunk.web, 'uri', ''),
+                            })
+
+        return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
-        return f"Analysis failed: {str(e)}"
+        return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
