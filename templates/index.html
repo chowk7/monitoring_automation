@@ -10,7 +10,7 @@
     <div class="container">
         <header>
             <h1>Stock Movement Analyzer</h1>
-            <p class="subtitle">전일 주가 변동 원인 분석기</p>
+            <p class="subtitle">전일 주가 변동 원인 분석기 (Gemini 2.5 Pro)</p>
         </header>
 
         <!-- Ticker Input Section -->
@@ -20,6 +20,7 @@
                 <input type="text" id="tickerInput" placeholder="예: AAPL, 005930.KS"
                        autocomplete="off" spellcheck="false">
                 <button id="addBtn" class="btn btn-add">추가</button>
+                <button id="loadDefaultsBtn" class="btn btn-defaults">기본 종목</button>
             </div>
             <p class="hint">미국 주식: AAPL, TSLA / 한국 주식: 005930.KS (삼성전자), 000660.KS (SK하이닉스)</p>
         </section>
@@ -51,6 +52,9 @@
         <!-- Results Section -->
         <section id="resultsSection" class="card results-section" style="display:none;">
             <h2>분석 결과</h2>
+
+            <!-- Category Stats -->
+            <div id="categoryStatsSection" class="category-stats"></div>
 
             <!-- All stocks overview -->
             <div id="allStocksOverview" class="stocks-overview"></div>

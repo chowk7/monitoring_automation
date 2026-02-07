@@ -35,6 +35,21 @@ _gemini_client = None
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
 ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
 
+# ─── Default Categories and Tickers ───────────────────────────────────────────
+
+DEFAULT_CATEGORIES = {
+    "반도체": ["IFX.DE", "NXPI", "STMPA.PA", "WOLF", "6723.T", "NVDA", "AMD", "ARM", "QCOM", "INTC", "AVGO", "MRVL", "MU", "000660.KS", "WDC", "SNDK", "285A.T", "2330.TW", "GFS", "0981.HK", "ASML.AS"],
+    "네트워크": ["CIEN", "NOKIA.HE", "ERIC-B.ST", "CSCO"],
+    "바이오": ["068270.KS", "BIIB", "OGN", "MRNA", "PFE", "AMGN", "ROG.SW", "LLY", "NVO", "4523.T", "LONN.SW", "4901.T", "OXB.L", "2269.HK", "2359.HK", "BANB.SW", "PPGN.SW"],
+    "의료기기": ["GEHC", "PHIA.AS", "SHL.DE", "PACB", "TEM", "GH", "ILMN", "GRAL"],
+    "공조": ["JCI", "TT", "CARR", "LII", "VRT"],
+    "가전": ["ELUX-B.ST", "WHR"],
+    "전장": ["APTV", "AMVOY", "TSLA", "MBLY", "VOW.DE", "2594.CH", "005380.KS"],
+    "게임": ["RBLX", "U", "3659.T"],
+    "기타": ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "9988.HK", "6758.T", "373220.KS", "GLW", "6324.T"],
+    "삼성": ["005930.KS", "028260.KS", "006400.KS", "018260.KS", "032830.KS", "009150.KS", "000810.KS", "209780.KS", "008770.KS", "012750.KS", "010140.KS", "016360.KS", "028050.KS", "030000.KS", "012620.KS", "207940.KS"],
+}
+
 
 def log_memory(label=""):
     """Log current memory usage."""
@@ -49,6 +64,15 @@ def get_gemini_client():
     if _gemini_client is None and GEMINI_API_KEY:
         _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     return _gemini_client
+
+
+def get_ticker_category(ticker):
+    """Get the category for a given ticker."""
+    ticker_upper = ticker.upper()
+    for category, tickers in DEFAULT_CATEGORIES.items():
+        if ticker_upper in [t.upper() for t in tickers]:
+            return category
+    return "기타"
 
 
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
@@ -146,6 +170,30 @@ def clear_tickers():
     return jsonify({"tickers": [], "message": "All tickers cleared"})
 
 
+@app.route("/api/tickers/defaults", methods=["POST"])
+def load_default_tickers():
+    """Load all default tickers from categories."""
+    all_tickers = []
+    for category, tickers in DEFAULT_CATEGORIES.items():
+        for t in tickers:
+            t_upper = t.upper()
+            if t_upper not in all_tickers:
+                all_tickers.append(t_upper)
+
+    save_tickers_to_csv(all_tickers)
+    return jsonify({
+        "tickers": all_tickers,
+        "count": len(all_tickers),
+        "categories": list(DEFAULT_CATEGORIES.keys()),
+    })
+
+
+@app.route("/api/categories", methods=["GET"])
+def get_categories():
+    """Get all default categories and their tickers."""
+    return jsonify({"categories": DEFAULT_CATEGORIES})
+
+
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
@@ -171,20 +219,44 @@ def analyze_stream():
 
             for ticker in batch:
                 result = fetch_single_ticker(ticker)
+                category = get_ticker_category(ticker)
                 all_stocks_slim[ticker] = {
                     "name": result.get("name", ticker),
                     "change_pct": result.get("change_pct", 0),
+                    "category": category,
                 }
                 if "error" in result:
                     all_stocks_slim[ticker]["error"] = result["error"]
 
                 if abs(result.get("change_pct", 0)) >= 5.0:
-                    filtered_list.append((ticker, result))
+                    filtered_list.append((ticker, result, category))
 
             gc.collect()
 
-        # Send all_stocks data
-        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim})}\n\n"
+        # Calculate category stats
+        category_stats = {}
+        for ticker, info in all_stocks_slim.items():
+            cat = info.get("category", "기타")
+            if cat not in category_stats:
+                category_stats[cat] = {"up": 0, "down": 0, "total_pct": 0, "count": 0}
+
+            change = info.get("change_pct", 0)
+            if change > 0:
+                category_stats[cat]["up"] += 1
+            elif change < 0:
+                category_stats[cat]["down"] += 1
+            category_stats[cat]["total_pct"] += change
+            category_stats[cat]["count"] += 1
+
+        # Calculate averages
+        for cat, stats in category_stats.items():
+            if stats["count"] > 0:
+                stats["avg_pct"] = round(stats["total_pct"] / stats["count"], 2)
+            else:
+                stats["avg_pct"] = 0
+
+        # Send all_stocks data with category stats
+        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim, 'category_stats': category_stats})}\n\n"
 
         log_memory("AFTER FETCH")
 
@@ -209,7 +281,7 @@ def analyze_stream():
             yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
 
             batch_results = []
-            for ticker, info in batch:
+            for ticker, info, category in batch:
                 try:
                     result = analyze_with_gemini(ticker, info)
 
@@ -217,6 +289,7 @@ def analyze_stream():
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
+                        "category": category,
                         "analysis": result["analysis"],
                         "sources": result.get("sources", []),
                     })
@@ -227,6 +300,7 @@ def analyze_stream():
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
+                        "category": category,
                         "analysis": f"Analysis failed: {str(e)}",
                         "sources": [],
                     })
@@ -352,18 +426,44 @@ Instructions:
 
         # Extract grounding sources (up to 3)
         sources = []
-        if hasattr(response, 'candidates') and response.candidates:
-            candidate = response.candidates[0]
-            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                grounding = candidate.grounding_metadata
-                if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                    for chunk in grounding.grounding_chunks[:3]:
-                        if hasattr(chunk, 'web') and chunk.web:
-                            sources.append({
-                                "title": getattr(chunk.web, 'title', ''),
-                                "url": getattr(chunk.web, 'uri', ''),
-                            })
+        try:
+            if hasattr(response, 'candidates') and response.candidates:
+                candidate = response.candidates[0]
+                logger.info(f"[GROUNDING] Candidate attrs: {dir(candidate)}")
 
+                if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                    grounding = candidate.grounding_metadata
+                    logger.info(f"[GROUNDING] Grounding metadata attrs: {dir(grounding)}")
+
+                    # Try grounding_chunks
+                    if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
+                        for chunk in grounding.grounding_chunks[:3]:
+                            if hasattr(chunk, 'web') and chunk.web:
+                                sources.append({
+                                    "title": getattr(chunk.web, 'title', ''),
+                                    "url": getattr(chunk.web, 'uri', ''),
+                                })
+
+                    # Try search_entry_point if no chunks
+                    if not sources and hasattr(grounding, 'search_entry_point'):
+                        sep = grounding.search_entry_point
+                        if hasattr(sep, 'rendered_content'):
+                            logger.info(f"[GROUNDING] Search entry point found")
+
+                    # Try grounding_supports
+                    if not sources and hasattr(grounding, 'grounding_supports'):
+                        for support in grounding.grounding_supports[:3]:
+                            if hasattr(support, 'grounding_chunk_indices'):
+                                logger.info(f"[GROUNDING] Support chunk indices: {support.grounding_chunk_indices}")
+
+                    # Try web_search_queries
+                    if hasattr(grounding, 'web_search_queries'):
+                        logger.info(f"[GROUNDING] Web search queries: {grounding.web_search_queries}")
+
+        except Exception as e:
+            logger.error(f"[GROUNDING] Error extracting sources: {e}")
+
+        logger.info(f"[GROUNDING] Final sources count: {len(sources)}")
         return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}

@@ -148,6 +148,17 @@ header h1 {
     background: rgba(239, 68, 68, 0.15);
 }
 
+.btn-defaults {
+    padding: 12px 20px;
+    background: #6366f1;
+    color: #fff;
+    white-space: nowrap;
+}
+
+.btn-defaults:hover {
+    background: #4f46e5;
+}
+
 /* ─── Ticker List ─────────────────────────────────────────────────────────── */
 .section-header {
     display: flex;
@@ -258,6 +269,74 @@ header h1 {
     transition: width 0.5s ease;
 }
 
+/* ─── Category Stats ─────────────────────────────────────────────────────── */
+.category-stats {
+    margin-bottom: 24px;
+}
+
+.category-stats h3 {
+    font-size: 0.95rem;
+    color: #7a8a9e;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+.category-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.category-stat-card {
+    background: #253547;
+    border: 1px solid #2a3a4a;
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+}
+
+.category-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #c8d6e5;
+    margin-bottom: 6px;
+}
+
+.category-avg {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.category-avg.positive { color: #34d399; }
+.category-avg.negative { color: #f87171; }
+.category-avg.neutral { color: #94a3b8; }
+
+.category-counts {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    font-size: 0.75rem;
+}
+
+.up-count { color: #34d399; }
+.down-count { color: #f87171; }
+.total-count { color: #7a8a9e; }
+
+/* ─── Category Groups ────────────────────────────────────────────────────── */
+.category-group {
+    margin-bottom: 16px;
+}
+
+.category-group h4 {
+    font-size: 0.85rem;
+    color: #6366f1;
+    margin-bottom: 8px;
+    font-weight: 600;
+    padding-left: 4px;
+    border-left: 3px solid #6366f1;
+}
+
 /* ─── Results ─────────────────────────────────────────────────────────────── */
 .stocks-overview {
     margin-bottom: 24px;
@@ -354,6 +433,15 @@ header h1 {
     font-size: 0.8rem;
     color: #5a6a7a;
     margin-left: auto;
+}
+
+.result-category {
+    font-size: 0.75rem;
+    background: #6366f1;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
 }
 
 .result-analysis {

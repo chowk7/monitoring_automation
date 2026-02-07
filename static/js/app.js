@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const tickerInput = document.getElementById("tickerInput");
     const addBtn = document.getElementById("addBtn");
     const clearAllBtn = document.getElementById("clearAllBtn");
+    const loadDefaultsBtn = document.getElementById("loadDefaultsBtn");
     const tickerList = document.getElementById("tickerList");
     const tickerCount = document.getElementById("tickerCount");
     const analyzeBtn = document.getElementById("analyzeBtn");
@@ -9,6 +10,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadingText = document.getElementById("loadingText");
     const progressFill = document.getElementById("progressFill");
     const resultsSection = document.getElementById("resultsSection");
+    const categoryStatsSection = document.getElementById("categoryStatsSection");
     const allStocksOverview = document.getElementById("allStocksOverview");
     const analysisResults = document.getElementById("analysisResults");
     const errorSection = document.getElementById("errorSection");
@@ -29,6 +31,10 @@ document.addEventListener("DOMContentLoaded", () => {
         clearAllBtn.addEventListener("click", clearAllTickers);
     }
 
+    if (loadDefaultsBtn) {
+        loadDefaultsBtn.addEventListener("click", loadDefaultTickers);
+    }
+
     analyzeBtn.addEventListener("click", runAnalysis);
 
     // ─── Functions ───────────────────────────────────────────────────────
@@ -40,6 +46,21 @@ document.addEventListener("DOMContentLoaded", () => {
             renderTickers(data.tickers);
         } catch (err) {
             console.error("Failed to load tickers:", err);
+        }
+    }
+
+    async function loadDefaultTickers() {
+        try {
+            const resp = await fetch("/api/tickers/defaults", { method: "POST" });
+            const data = await resp.json();
+            if (resp.ok) {
+                renderTickers(data.tickers);
+                showSuccess(`${data.count}개 기본 종목 로드됨 (${data.categories.join(", ")})`);
+            } else {
+                showError(data.error || "Failed to load default tickers");
+            }
+        } catch (err) {
+            showError("Server error while loading default tickers");
         }
     }
 
@@ -145,11 +166,13 @@ document.addEventListener("DOMContentLoaded", () => {
         analyzeBtn.disabled = true;
 
         // Reset results area
+        if (categoryStatsSection) categoryStatsSection.innerHTML = "";
         allStocksOverview.innerHTML = "";
         analysisResults.innerHTML = "";
 
         // Accumulated data for streaming
         let allStocksData = {};
+        let categoryStats = {};
         let allResults = [];
 
         // Use SSE for streaming
@@ -179,9 +202,11 @@ document.addEventListener("DOMContentLoaded", () => {
                         break;
 
                     case "stocks":
-                        // Received all_stocks data - render overview
+                        // Received all_stocks data with category stats
                         allStocksData = data.all_stocks;
+                        categoryStats = data.category_stats || {};
                         resultsSection.style.display = "block";
+                        renderCategoryStats(categoryStats);
                         renderAllStocksOverview(allStocksData);
                         break;
 
@@ -227,29 +252,73 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
+    function renderCategoryStats(stats) {
+        if (!categoryStatsSection || !stats || Object.keys(stats).length === 0) return;
+
+        // Sort by avg_pct descending
+        const sortedCategories = Object.entries(stats).sort((a, b) => b[1].avg_pct - a[1].avg_pct);
+
+        let html = '<h3>카테고리별 통계</h3><div class="category-stats-grid">';
+        for (const [category, data] of sortedCategories) {
+            const avgCls = data.avg_pct > 0 ? "positive" : data.avg_pct < 0 ? "negative" : "neutral";
+            const sign = data.avg_pct > 0 ? "+" : "";
+            html += `
+                <div class="category-stat-card">
+                    <div class="category-name">${escapeHtml(category)}</div>
+                    <div class="category-avg ${avgCls}">${sign}${data.avg_pct.toFixed(2)}%</div>
+                    <div class="category-counts">
+                        <span class="up-count">▲ ${data.up}</span>
+                        <span class="down-count">▼ ${data.down}</span>
+                        <span class="total-count">총 ${data.count}</span>
+                    </div>
+                </div>
+            `;
+        }
+        html += "</div>";
+        categoryStatsSection.innerHTML = html;
+    }
+
     function renderAllStocksOverview(allStocks) {
         if (!allStocks || Object.keys(allStocks).length === 0) {
             allStocksOverview.innerHTML = "";
             return;
         }
 
-        let overviewHtml = '<h3>전체 종목 변동률</h3><div class="overview-grid">';
-        const entries = Object.entries(allStocks).sort(
-            (a, b) => Math.abs(b[1].change_pct) - Math.abs(a[1].change_pct)
-        );
-
-        for (const [ticker, info] of entries) {
-            if (info.error && info.change_pct === 0) {
-                overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(info.error)}">${escapeHtml(ticker)} (오류: ${escapeHtml(info.error)})</div>`;
-                continue;
-            }
-            const cls = info.change_pct > 0 ? "positive" : info.change_pct < 0 ? "negative" : "neutral";
-            const filtered = Math.abs(info.change_pct) >= 5 ? " filtered" : "";
-            const sign = info.change_pct > 0 ? "+" : "";
-            const displayName = info.name || ticker;
-            overviewHtml += `<div class="overview-item ${cls}${filtered}">${escapeHtml(displayName)} ${sign}${info.change_pct.toFixed(1)}%</div>`;
+        // Group by category
+        const byCategory = {};
+        for (const [ticker, info] of Object.entries(allStocks)) {
+            const cat = info.category || "기타";
+            if (!byCategory[cat]) byCategory[cat] = [];
+            byCategory[cat].push({ ticker, ...info });
         }
-        overviewHtml += "</div>";
+
+        let overviewHtml = '<h3>전체 종목 변동률</h3>';
+
+        // Category order
+        const categoryOrder = ["반도체", "네트워크", "바이오", "의료기기", "공조", "가전", "전장", "게임", "삼성", "기타"];
+
+        for (const cat of categoryOrder) {
+            if (!byCategory[cat]) continue;
+
+            const stocks = byCategory[cat].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+
+            overviewHtml += `<div class="category-group"><h4>${escapeHtml(cat)}</h4><div class="overview-grid">`;
+
+            for (const stock of stocks) {
+                if (stock.error && stock.change_pct === 0) {
+                    overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(stock.error)}">${escapeHtml(stock.ticker)} (오류)</div>`;
+                    continue;
+                }
+                const cls = stock.change_pct > 0 ? "positive" : stock.change_pct < 0 ? "negative" : "neutral";
+                const filtered = Math.abs(stock.change_pct) >= 5 ? " filtered" : "";
+                const sign = stock.change_pct > 0 ? "+" : "";
+                const displayName = stock.name || stock.ticker;
+                overviewHtml += `<div class="overview-item ${cls}${filtered}">${escapeHtml(displayName)} ${sign}${stock.change_pct.toFixed(1)}%</div>`;
+            }
+
+            overviewHtml += "</div></div>";
+        }
+
         allStocksOverview.innerHTML = overviewHtml;
     }
 
@@ -261,6 +330,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const cls = result.change_pct > 0 ? "positive" : "negative";
             const sign = result.change_pct > 0 ? "+" : "";
             const analysisHtml = formatAnalysis(result.analysis);
+            const categoryLabel = result.category ? `<span class="result-category">${escapeHtml(result.category)}</span>` : "";
 
             // Build sources HTML
             let sourcesHtml = "";
@@ -278,7 +348,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     <div class="result-header">
                         <span class="result-name">${escapeHtml(result.name)}</span>
                         <span class="result-change ${cls}">${sign}${result.change_pct.toFixed(1)}%</span>
-                        <span class="result-meta">Gemini 2.5 Pro 분석</span>
+                        ${categoryLabel}
+                        <span class="result-meta">Gemini 2.5 Pro</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
                     ${sourcesHtml}
@@ -309,14 +380,14 @@ document.addEventListener("DOMContentLoaded", () => {
     function showError(msg) {
         errorSection.style.display = "block";
         errorText.textContent = msg;
-        errorSection.className = "error-section";
+        errorSection.className = "card error-section";
         setTimeout(() => { errorSection.style.display = "none"; }, 5000);
     }
 
     function showSuccess(msg) {
         errorSection.style.display = "block";
         errorText.textContent = msg;
-        errorSection.className = "error-section success";
+        errorSection.className = "card error-section success";
         setTimeout(() => { errorSection.style.display = "none"; }, 3000);
     }
 
