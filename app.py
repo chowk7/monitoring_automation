@@ -398,7 +398,7 @@ def fetch_single_ticker(ticker_symbol):
 
 
 def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro with Google Search grounding to analyze stock price movement."""
+    """Use Gemini 2.5 Pro to analyze stock price movement (no grounding for memory optimization)."""
     if not GEMINI_API_KEY:
         return {"analysis": "Gemini API key not configured.", "sources": []}
 
@@ -424,34 +424,14 @@ def analyze_with_gemini(ticker, stock_info):
 """
 
     try:
-        from google.genai import types
-
+        # Simple API call without grounding (reduces memory usage)
         response = client.models.generate_content(
             model="gemini-2.5-pro",
             contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-            ),
         )
 
         analysis_text = response.text if response.text else "분석 결과 없음"
-
-        # Extract grounding sources (up to 3)
-        sources = []
-        try:
-            if response.candidates and response.candidates[0].grounding_metadata:
-                grounding = response.candidates[0].grounding_metadata
-                if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
-                    for chunk in grounding.grounding_chunks[:3]:
-                        if hasattr(chunk, 'web') and chunk.web:
-                            sources.append({
-                                "title": getattr(chunk.web, 'title', '') or '',
-                                "url": getattr(chunk.web, 'uri', '') or '',
-                            })
-        except Exception:
-            pass
-
-        return {"analysis": analysis_text, "sources": sources}
+        return {"analysis": analysis_text, "sources": []}
     except Exception as e:
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
 
