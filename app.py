@@ -3,6 +3,9 @@ import gc
 import csv
 import json
 import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, Response
@@ -28,6 +31,17 @@ TICKERS_CSV_FILE = "tickers.csv"
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# Email Configuration
+EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+EMAIL_SMTP_SERVER = os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", "")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
+EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS", "").split(",")  # comma-separated
+
+# Webhook Configuration
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
@@ -340,20 +354,24 @@ def analyze_stream():
             yield f"data: {json.dumps({'type': 'done', 'message': 'No stocks with +/- 5% change found.'})}\n\n"
             return
 
-        # Sort filtered list
-        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+        # Keep original ticker order (do not sort)
+        # Create order map based on ticker_list
+        ticker_order = {t: i for i, t in enumerate(ticker_list)}
+        filtered_list.sort(key=lambda x: ticker_order.get(x[0], 999))
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
         # Phase 2: Analyze filtered stocks in parallel batches (5 at a time)
         total_stocks = len(filtered_list)
         total_batches = (total_stocks + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
+        all_analysis_results = []  # Collect all results for email
 
-        def analyze_stock(item):
+        def analyze_stock(item, idx):
             ticker, info, category = item
             try:
                 result = analyze_with_gemini(ticker, info)
                 return {
+                    "idx": idx,
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -364,6 +382,7 @@ def analyze_stream():
             except Exception as e:
                 logger.error(f"Error processing {ticker}: {e}")
                 return {
+                    "idx": idx,
                     "ticker": ticker,
                     "name": info.get("name", ticker),
                     "change_pct": info["change_pct"],
@@ -381,17 +400,31 @@ def analyze_stream():
             # Process batch in parallel
             batch_results = []
             with ThreadPoolExecutor(max_workers=ANALYSIS_BATCH_SIZE) as executor:
-                futures = [executor.submit(analyze_stock, item) for item in batch]
+                futures = [executor.submit(analyze_stock, item, batch_idx + i) for i, item in enumerate(batch)]
                 for future in as_completed(futures):
                     batch_results.append(future.result())
 
-            # Sort by change_pct
-            batch_results.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+            # Sort by original index to maintain order
+            batch_results.sort(key=lambda x: x["idx"])
+
+            # Remove idx before sending
+            for r in batch_results:
+                del r["idx"]
+                all_analysis_results.append(r)
 
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
 
             gc.collect()
+
+        # Send email if enabled
+        if EMAIL_ENABLED and all_analysis_results:
+            try:
+                send_analysis_email(all_analysis_results, all_stocks_slim, category_stats)
+                yield f"data: {json.dumps({'type': 'email', 'message': '이메일 발송 완료'})}\n\n"
+            except Exception as e:
+                logger.error(f"Email send failed: {e}")
+                yield f"data: {json.dumps({'type': 'email', 'message': f'이메일 발송 실패: {str(e)}'})}\n\n"
 
         log_memory("STREAM DONE")
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -523,6 +556,268 @@ Rising expectations for AI semiconductor demand surge, along with news of major 
         return {"analysis": analysis_text, "sources": sources}
     except Exception as e:
         return {"analysis": f"Analysis failed: {str(e)}", "sources": []}
+
+
+# ─── Email Function ────────────────────────────────────────────────────────────
+
+def send_analysis_email(analysis_results, all_stocks, category_stats):
+    """Send analysis results via email."""
+    if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECIPIENTS:
+        logger.warning("Email configuration incomplete")
+        return
+
+    # Build email content
+    today = datetime.now().strftime("%Y-%m-%d")
+    subject = f"[주가분석] {today} - {len(analysis_results)}개 종목 분석 완료"
+
+    # HTML email body
+    html = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; }}
+            .positive {{ color: #10b981; }}
+            .negative {{ color: #ef4444; }}
+            .stock {{ margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }}
+            .stock-header {{ font-size: 16px; font-weight: bold; margin-bottom: 10px; }}
+            .analysis {{ color: #333; line-height: 1.6; }}
+            .sources {{ margin-top: 10px; font-size: 12px; color: #666; }}
+            .category-stats {{ margin-bottom: 20px; }}
+            .stat-item {{ display: inline-block; margin-right: 15px; padding: 5px 10px; background: #f5f5f5; border-radius: 4px; }}
+        </style>
+    </head>
+    <body>
+        <h2>주가 분석 리포트 - {today}</h2>
+
+        <div class="category-stats">
+            <h3>카테고리별 통계</h3>
+    """
+
+    for cat, stats in category_stats.items():
+        avg_cls = "positive" if stats["avg_pct"] > 0 else "negative"
+        sign = "+" if stats["avg_pct"] > 0 else ""
+        html += f'<span class="stat-item"><b>{cat}</b>: <span class="{avg_cls}">{sign}{stats["avg_pct"]:.2f}%</span> (▲{stats["up"]} ▼{stats["down"]})</span>'
+
+    html += """
+        </div>
+        <h3>상세 분석</h3>
+    """
+
+    for result in analysis_results:
+        change_pct = result["change_pct"]
+        cls = "positive" if change_pct > 0 else "negative"
+        sign = "+" if change_pct > 0 else ""
+
+        html += f"""
+        <div class="stock">
+            <div class="stock-header">
+                {result["name"]} ({result["ticker"]})
+                <span class="{cls}">{sign}{change_pct:.1f}%</span>
+                <span style="color: #666; font-size: 12px;">[{result["category"]}]</span>
+            </div>
+            <div class="analysis">{result["analysis"].replace(chr(10), "<br>")}</div>
+        """
+
+        if result.get("sources"):
+            html += '<div class="sources"><b>참고:</b> '
+            for src in result["sources"]:
+                html += f'<a href="{src["url"]}">{src["title"] or src["url"]}</a> | '
+            html += "</div>"
+
+        html += "</div>"
+
+    html += """
+    </body>
+    </html>
+    """
+
+    # Send email
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = ", ".join([r.strip() for r in EMAIL_RECIPIENTS if r.strip()])
+
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
+        server.starttls()
+        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_SENDER, [r.strip() for r in EMAIL_RECIPIENTS if r.strip()], msg.as_string())
+
+    logger.info(f"Email sent to {EMAIL_RECIPIENTS}")
+
+
+# ─── Webhook Endpoints ─────────────────────────────────────────────────────────
+
+@app.route("/webhook/analyze", methods=["POST"])
+def webhook_analyze():
+    """Webhook to trigger analysis. Returns analysis results as JSON."""
+    # Verify webhook secret if configured
+    if WEBHOOK_SECRET:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header != f"Bearer {WEBHOOK_SECRET}":
+            return jsonify({"error": "Unauthorized"}), 401
+
+    tickers_dict = load_tickers_from_csv()
+    if not tickers_dict:
+        return jsonify({"error": "No tickers saved."}), 400
+
+    ticker_list = list(tickers_dict.keys())
+
+    # Fetch stock data in parallel
+    all_stocks = {}
+    filtered_list = []
+
+    def fetch_with_category(ticker):
+        result = fetch_single_ticker(ticker)
+        category = tickers_dict.get(ticker, get_ticker_category(ticker))
+        return ticker, result, category
+
+    with ThreadPoolExecutor(max_workers=FETCH_PARALLEL_WORKERS) as executor:
+        futures = {executor.submit(fetch_with_category, t): t for t in ticker_list}
+        for future in as_completed(futures):
+            ticker, result, category = future.result()
+            change_pct = result.get("change_pct", 0)
+
+            all_stocks[ticker] = {
+                "name": result.get("name", ticker),
+                "change_pct": change_pct,
+                "category": category,
+            }
+            if "error" in result:
+                all_stocks[ticker]["error"] = result["error"]
+
+            if abs(change_pct) >= 5.0:
+                filtered_list.append((ticker, {
+                    "name": result.get("name", ticker),
+                    "change_pct": change_pct,
+                    "date": result.get("date", ""),
+                }, category))
+
+    # Calculate category stats
+    category_stats = {}
+    for ticker, info in all_stocks.items():
+        cat = info.get("category", "기타")
+        if cat not in category_stats:
+            category_stats[cat] = {"up": 0, "down": 0, "total_pct": 0, "count": 0}
+        change = info.get("change_pct", 0)
+        if change > 0:
+            category_stats[cat]["up"] += 1
+        elif change < 0:
+            category_stats[cat]["down"] += 1
+        category_stats[cat]["total_pct"] += change
+        category_stats[cat]["count"] += 1
+
+    for cat, stats in category_stats.items():
+        stats["avg_pct"] = round(stats["total_pct"] / stats["count"], 2) if stats["count"] > 0 else 0
+
+    if not filtered_list:
+        return jsonify({
+            "message": "No stocks with +/- 5% change found.",
+            "all_stocks": all_stocks,
+            "category_stats": category_stats,
+            "analysis_results": [],
+        })
+
+    # Keep original order
+    ticker_order = {t: i for i, t in enumerate(ticker_list)}
+    filtered_list.sort(key=lambda x: ticker_order.get(x[0], 999))
+
+    # Analyze with Gemini
+    analysis_results = []
+
+    def analyze_stock(item):
+        ticker, info, category = item
+        try:
+            result = analyze_with_gemini(ticker, info)
+            return {
+                "ticker": ticker,
+                "name": info.get("name", ticker),
+                "change_pct": info["change_pct"],
+                "category": category,
+                "analysis": result["analysis"],
+                "sources": result.get("sources", []),
+            }
+        except Exception as e:
+            return {
+                "ticker": ticker,
+                "name": info.get("name", ticker),
+                "change_pct": info["change_pct"],
+                "category": category,
+                "analysis": f"Analysis failed: {str(e)}",
+                "sources": [],
+            }
+
+    # Process in parallel batches
+    for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
+        batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=ANALYSIS_BATCH_SIZE) as executor:
+            futures = {executor.submit(analyze_stock, item): i for i, item in enumerate(batch)}
+            batch_results = [None] * len(batch)
+            for future in as_completed(futures):
+                idx = futures[future]
+                batch_results[idx] = future.result()
+            analysis_results.extend(batch_results)
+
+    # Send email if enabled
+    email_sent = False
+    if EMAIL_ENABLED and analysis_results:
+        try:
+            send_analysis_email(analysis_results, all_stocks, category_stats)
+            email_sent = True
+        except Exception as e:
+            logger.error(f"Email send failed: {e}")
+
+    return jsonify({
+        "all_stocks": all_stocks,
+        "category_stats": category_stats,
+        "analysis_results": analysis_results,
+        "email_sent": email_sent,
+    })
+
+
+@app.route("/webhook/health", methods=["GET", "POST"])
+def webhook_health():
+    """Simple health check for webhooks."""
+    return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
+
+
+@app.route("/api/email/test", methods=["POST"])
+def test_email():
+    """Test email configuration."""
+    if not EMAIL_ENABLED:
+        return jsonify({"error": "Email is not enabled. Set EMAIL_ENABLED=true"}), 400
+
+    try:
+        # Send test email
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "[주가분석] 테스트 이메일"
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = ", ".join([r.strip() for r in EMAIL_RECIPIENTS if r.strip()])
+
+        html = "<html><body><h2>이메일 설정 테스트</h2><p>이메일이 정상적으로 발송되었습니다.</p></body></html>"
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, [r.strip() for r in EMAIL_RECIPIENTS if r.strip()], msg.as_string())
+
+        return jsonify({"message": "Test email sent successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/email/config", methods=["GET"])
+def get_email_config():
+    """Get email configuration status (without sensitive data)."""
+    return jsonify({
+        "enabled": EMAIL_ENABLED,
+        "smtp_server": EMAIL_SMTP_SERVER,
+        "smtp_port": EMAIL_SMTP_PORT,
+        "sender_configured": bool(EMAIL_SENDER),
+        "recipients": [r.strip() for r in EMAIL_RECIPIENTS if r.strip()],
+    })
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
