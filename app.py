@@ -351,6 +351,15 @@ def analyze_stream():
         log_memory("AFTER FETCH")
 
         if not filtered_list:
+            # Send email with all stocks even if no filtered results
+            if EMAIL_ENABLED:
+                try:
+                    send_analysis_email([], all_stocks_slim, category_stats)
+                    yield f"data: {json.dumps({'type': 'email', 'message': '이메일 발송 완료 (전체 결과)'})}\n\n"
+                except Exception as e:
+                    logger.error(f"Email send failed: {e}")
+                    yield f"data: {json.dumps({'type': 'email', 'message': f'이메일 발송 실패: {str(e)}'})}\n\n"
+
             yield f"data: {json.dumps({'type': 'done', 'message': 'No stocks with +/- 5% change found.'})}\n\n"
             return
 
@@ -561,70 +570,135 @@ Rising expectations for AI semiconductor demand surge, along with news of major 
 # ─── Email Function ────────────────────────────────────────────────────────────
 
 def send_analysis_email(analysis_results, all_stocks, category_stats):
-    """Send analysis results via email."""
+    """Send full analysis results via email including all stocks."""
     if not EMAIL_SENDER or not EMAIL_PASSWORD or not EMAIL_RECIPIENTS:
         logger.warning("Email configuration incomplete")
         return
 
     # Build email content
     today = datetime.now().strftime("%Y-%m-%d")
-    subject = f"[주가분석] {today} - {len(analysis_results)}개 종목 분석 완료"
+    total_stocks = len(all_stocks)
+    analyzed_count = len(analysis_results)
+    subject = f"[주가분석] {today} - 전체 {total_stocks}개 종목 / {analyzed_count}개 상세분석"
+
+    # Group all stocks by category for overview
+    stocks_by_category = {}
+    for ticker, info in all_stocks.items():
+        cat = info.get("category", "기타")
+        if cat not in stocks_by_category:
+            stocks_by_category[cat] = []
+        stocks_by_category[cat].append({
+            "ticker": ticker,
+            "name": info.get("name", ticker),
+            "change_pct": info.get("change_pct", 0),
+        })
+
+    # Sort stocks within each category by change_pct
+    for cat in stocks_by_category:
+        stocks_by_category[cat].sort(key=lambda x: x["change_pct"], reverse=True)
 
     # HTML email body
     html = f"""
     <html>
     <head>
         <style>
-            body {{ font-family: Arial, sans-serif; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
             .positive {{ color: #10b981; }}
             .negative {{ color: #ef4444; }}
+            .neutral {{ color: #666; }}
             .stock {{ margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }}
             .stock-header {{ font-size: 16px; font-weight: bold; margin-bottom: 10px; }}
             .analysis {{ color: #333; line-height: 1.6; }}
             .sources {{ margin-top: 10px; font-size: 12px; color: #666; }}
             .category-stats {{ margin-bottom: 20px; }}
-            .stat-item {{ display: inline-block; margin-right: 15px; padding: 5px 10px; background: #f5f5f5; border-radius: 4px; }}
+            .stat-item {{ display: inline-block; margin-right: 15px; padding: 5px 10px; background: #f5f5f5; border-radius: 4px; margin-bottom: 5px; }}
+            .overview-section {{ margin-bottom: 30px; padding: 15px; background: #f9f9f9; border-radius: 8px; }}
+            .overview-category {{ margin-bottom: 15px; }}
+            .overview-category h4 {{ margin: 0 0 8px 0; color: #333; border-left: 3px solid #6366f1; padding-left: 8px; }}
+            .stock-item {{ display: inline-block; padding: 4px 10px; margin: 2px; border-radius: 4px; font-size: 12px; background: #fff; border: 1px solid #ddd; }}
+            .stock-item.positive {{ background: #ecfdf5; border-color: #10b981; }}
+            .stock-item.negative {{ background: #fef2f2; border-color: #ef4444; }}
+            .divider {{ border-top: 2px solid #e5e5e5; margin: 30px 0; }}
         </style>
     </head>
     <body>
-        <h2>주가 분석 리포트 - {today}</h2>
+        <h2>📊 주가 분석 리포트 - {today}</h2>
+        <p>전체 {total_stocks}개 종목 중 ±5% 이상 변동 {analyzed_count}개 종목 상세 분석</p>
 
         <div class="category-stats">
-            <h3>카테고리별 통계</h3>
+            <h3>📈 카테고리별 통계</h3>
     """
 
-    for cat, stats in category_stats.items():
-        avg_cls = "positive" if stats["avg_pct"] > 0 else "negative"
+    # Sort categories by avg_pct
+    sorted_cats = sorted(category_stats.items(), key=lambda x: x[1]["avg_pct"], reverse=True)
+    for cat, stats in sorted_cats:
+        avg_cls = "positive" if stats["avg_pct"] > 0 else "negative" if stats["avg_pct"] < 0 else "neutral"
         sign = "+" if stats["avg_pct"] > 0 else ""
         html += f'<span class="stat-item"><b>{cat}</b>: <span class="{avg_cls}">{sign}{stats["avg_pct"]:.2f}%</span> (▲{stats["up"]} ▼{stats["down"]})</span>'
 
     html += """
         </div>
-        <h3>상세 분석</h3>
+
+        <div class="overview-section">
+            <h3>📋 전체 종목 변동률</h3>
     """
 
-    for result in analysis_results:
-        change_pct = result["change_pct"]
-        cls = "positive" if change_pct > 0 else "negative"
-        sign = "+" if change_pct > 0 else ""
+    # Add all stocks overview by category
+    category_order = ["반도체", "네트워크", "바이오", "의료기기", "공조", "가전", "전장", "게임", "삼성", "기타"]
+    for cat in category_order:
+        if cat not in stocks_by_category:
+            continue
+        stocks = stocks_by_category[cat]
+        html += f'<div class="overview-category"><h4>{cat} ({len(stocks)})</h4>'
+        for stock in stocks:
+            change_pct = stock["change_pct"]
+            cls = "positive" if change_pct > 0 else "negative" if change_pct < 0 else "neutral"
+            sign = "+" if change_pct > 0 else ""
+            html += f'<span class="stock-item {cls}">{stock["name"]} {sign}{change_pct:.1f}%</span>'
+        html += '</div>'
 
-        html += f"""
-        <div class="stock">
-            <div class="stock-header">
-                {result["name"]} ({result["ticker"]})
-                <span class="{cls}">{sign}{change_pct:.1f}%</span>
-                <span style="color: #666; font-size: 12px;">[{result["category"]}]</span>
-            </div>
-            <div class="analysis">{result["analysis"].replace(chr(10), "<br>")}</div>
-        """
+    # Add remaining categories
+    for cat, stocks in stocks_by_category.items():
+        if cat in category_order:
+            continue
+        html += f'<div class="overview-category"><h4>{cat} ({len(stocks)})</h4>'
+        for stock in stocks:
+            change_pct = stock["change_pct"]
+            cls = "positive" if change_pct > 0 else "negative" if change_pct < 0 else "neutral"
+            sign = "+" if change_pct > 0 else ""
+            html += f'<span class="stock-item {cls}">{stock["name"]} {sign}{change_pct:.1f}%</span>'
+        html += '</div>'
 
-        if result.get("sources"):
-            html += '<div class="sources"><b>참고:</b> '
-            for src in result["sources"]:
-                html += f'<a href="{src["url"]}">{src["title"] or src["url"]}</a> | '
+    html += '</div>'
+
+    # Add detailed analysis section
+    if analysis_results:
+        html += '<div class="divider"></div><h3>🔍 상세 분석 (±5% 이상 변동 종목)</h3>'
+
+        for result in analysis_results:
+            change_pct = result["change_pct"]
+            cls = "positive" if change_pct > 0 else "negative"
+            sign = "+" if change_pct > 0 else ""
+
+            html += f"""
+            <div class="stock">
+                <div class="stock-header">
+                    {result["name"]} ({result["ticker"]})
+                    <span class="{cls}">{sign}{change_pct:.1f}%</span>
+                    <span style="color: #666; font-size: 12px;">[{result["category"]}]</span>
+                </div>
+                <div class="analysis">{result["analysis"].replace(chr(10), "<br>")}</div>
+            """
+
+            if result.get("sources"):
+                html += '<div class="sources"><b>참고:</b> '
+                for src in result["sources"]:
+                    html += f'<a href="{src["url"]}">{src["title"] or src["url"]}</a> | '
+                html += "</div>"
+
             html += "</div>"
-
-        html += "</div>"
+    else:
+        html += '<p>±5% 이상 변동 종목이 없습니다.</p>'
 
     html += """
     </body>
@@ -712,11 +786,21 @@ def webhook_analyze():
         stats["avg_pct"] = round(stats["total_pct"] / stats["count"], 2) if stats["count"] > 0 else 0
 
     if not filtered_list:
+        # Send email with all stocks even if no filtered results
+        email_sent = False
+        if EMAIL_ENABLED:
+            try:
+                send_analysis_email([], all_stocks, category_stats)
+                email_sent = True
+            except Exception as e:
+                logger.error(f"Email send failed: {e}")
+
         return jsonify({
             "message": "No stocks with +/- 5% change found.",
             "all_stocks": all_stocks,
             "category_stats": category_stats,
             "analysis_results": [],
+            "email_sent": email_sent,
         })
 
     # Keep original order
