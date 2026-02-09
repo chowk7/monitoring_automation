@@ -59,10 +59,34 @@ DEFAULT_CATEGORIES = {
     "의료기기": ["GEHC", "PHIA.AS", "SHL.DE", "PACB", "TEM", "GH", "ILMN", "GRAL"],
     "공조": ["JCI", "TT", "CARR", "LII", "VRT"],
     "가전": ["ELUX-B.ST", "WHR"],
-    "전장": ["APTV", "AMVOY", "TSLA", "MBLY", "VOW.DE", "2594.CH", "005380.KS"],
+    "전장": ["APTV", "AMVOY", "TSLA", "MBLY", "VOW.DE", "002594.SZ", "005380.KS"],
     "게임": ["RBLX", "U", "3659.T"],
     "기타": ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "9988.HK", "6758.T", "373220.KS", "GLW", "6324.T"],
-    "삼성": ["005930.KS", "028260.KS", "006400.KS", "018260.KS", "032830.KS", "009150.KS", "000810.KS", "209780.KS", "008770.KS", "012750.KS", "010140.KS", "016360.KS", "028050.KS", "030000.KS", "012620.KS", "207940.KS"],
+    "삼성": ["005930.KS", "028260.KS", "006400.KS", "018260.KS", "032830.KS", "009150.KS", "000810.KS", "029780.KS", "008770.KS", "012750.KS", "010140.KS", "016360.KS", "028050.KS", "030000.KS", "012620.KS", "207940.KS"],
+}
+
+# Korean names for Samsung group stocks
+KOREAN_STOCK_NAMES = {
+    "005930.KS": "삼성전자",
+    "028260.KS": "삼성물산",
+    "006400.KS": "삼성SDI",
+    "018260.KS": "삼성에스디에스",
+    "032830.KS": "삼성생명",
+    "009150.KS": "삼성전기",
+    "000810.KS": "삼성화재",
+    "029780.KS": "삼성카드",
+    "008770.KS": "호텔신라",
+    "012750.KS": "에스원",
+    "010140.KS": "삼성중공업",
+    "016360.KS": "삼성증권",
+    "028050.KS": "삼성엔지니어링",
+    "030000.KS": "제일기획",
+    "012620.KS": "삼성SDI우",
+    "207940.KS": "삼성바이오로직스",
+    "000660.KS": "SK하이닉스",
+    "068270.KS": "셀트리온",
+    "373220.KS": "LG에너지솔루션",
+    "005380.KS": "현대차",
 }
 
 
@@ -488,7 +512,13 @@ def fetch_single_ticker(ticker_symbol):
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
         last_date = datetime.fromtimestamp(valid[-1][0]).date()
-        name = meta.get("shortName", meta.get("longName", ticker_symbol))
+
+        # Use Korean name if available, otherwise use Yahoo name
+        ticker_upper = ticker_symbol.upper()
+        if ticker_upper in KOREAN_STOCK_NAMES:
+            name = KOREAN_STOCK_NAMES[ticker_upper]
+        else:
+            name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
             "name": name,
