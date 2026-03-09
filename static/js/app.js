@@ -19,7 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveModelBtn = document.getElementById("saveModelBtn");
     const settingsToggle = document.getElementById("settingsToggle");
     const settingsBody = document.getElementById("settingsBody");
-    const newsSearchStatus = document.getElementById("newsSearchStatus");
+    // newsSearchStatus is now split into multiple elements (newsApiStatus, googleCseStatus)
 
     // Email elements
     const emailInput = document.getElementById("emailInput");
@@ -89,14 +89,27 @@ document.addEventListener("DOMContentLoaded", () => {
                 modelSelect.value = data.gemini_model;
             }
 
-            // Update news search status
-            if (newsSearchStatus) {
-                if (data.has_google_search) {
-                    newsSearchStatus.textContent = "✓ 활성화";
-                    newsSearchStatus.className = "status-badge status-active";
-                } else {
-                    newsSearchStatus.textContent = "✗ 비활성화 (GOOGLE_API_KEY, GOOGLE_CSE_ID 필요)";
-                    newsSearchStatus.className = "status-badge status-inactive";
+            // Update news sources status
+            if (data.news_sources) {
+                const newsApiEl = document.getElementById("newsApiStatus");
+                const googleCseEl = document.getElementById("googleCseStatus");
+                if (newsApiEl) {
+                    if (data.news_sources.newsapi) {
+                        newsApiEl.textContent = "NewsAPI ✓";
+                        newsApiEl.className = "status-badge status-active";
+                    } else {
+                        newsApiEl.textContent = "NewsAPI ✗ (NEWS_API_KEY 필요)";
+                        newsApiEl.className = "status-badge status-inactive";
+                    }
+                }
+                if (googleCseEl) {
+                    if (data.news_sources.google_cse) {
+                        googleCseEl.textContent = "Google CSE ✓";
+                        googleCseEl.className = "status-badge status-active";
+                    } else {
+                        googleCseEl.textContent = "Google CSE ✗ (API 키 필요)";
+                        googleCseEl.className = "status-badge status-inactive";
+                    }
                 }
             }
         } catch (err) {
@@ -490,7 +503,9 @@ document.addEventListener("DOMContentLoaded", () => {
             // News badge
             let newsBadge = "";
             if (result.articles_found) {
-                newsBadge = `<span class="news-badge">📰 뉴스 ${result.articles_count}건 참고</span>`;
+                const sources = (result.articles_sources || []).join(", ");
+                const srcLabel = sources ? ` (${sources})` : "";
+                newsBadge = `<span class="news-badge">📰 뉴스 ${result.articles_count}건${srcLabel}</span>`;
             } else {
                 newsBadge = `<span class="news-badge news-badge-none">Gemini 자체 분석</span>`;
             }

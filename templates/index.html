@@ -62,8 +62,12 @@
                 <!-- News Search Status -->
                 <div class="settings-row">
                     <label>뉴스 기사 검색</label>
-                    <span id="newsSearchStatus" class="status-badge status-unknown">확인 중...</span>
-                    <small class="settings-hint">Google Custom Search API로 기사 먼저 검색 후 Gemini 분석</small>
+                    <div class="news-sources-status" id="newsSourcesStatus">
+                        <span class="status-badge status-active">Yahoo Finance ✓</span>
+                        <span id="newsApiStatus" class="status-badge status-unknown">NewsAPI 확인 중...</span>
+                        <span id="googleCseStatus" class="status-badge status-unknown">Google CSE 확인 중...</span>
+                    </div>
+                    <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
                 </div>
             </div>
         </section>

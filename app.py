@@ -33,6 +33,7 @@ SETTINGS_FILE = "settings.json"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 # Email configuration
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -205,6 +206,11 @@ def get_settings():
     settings["available_models"] = AVAILABLE_GEMINI_MODELS
     settings["has_google_search"] = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
     settings["has_email"] = bool(SMTP_USER and SMTP_PASSWORD)
+    settings["news_sources"] = {
+        "yahoo_finance": True,  # always available, no API key needed
+        "newsapi": bool(NEWS_API_KEY),
+        "google_cse": bool(GOOGLE_API_KEY and GOOGLE_CSE_ID),
+    }
     return jsonify(settings)
 
 
@@ -404,8 +410,6 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        has_search = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
-
         # Phase 2: Analyze filtered stocks in batches
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
 
@@ -420,21 +424,19 @@ def analyze_stream():
             batch_results = []
             for ticker, info in batch:
                 try:
-                    articles = []
+                    # Step 1: Search news from all available sources
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
+                    articles = search_all_news_articles(
+                        ticker,
+                        info.get("name", ticker),
+                        info.get("date", "")
+                    )
 
-                    # Step 1: Search news articles if Google Search API is configured
-                    if has_search:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
-                        articles = search_news_articles(
-                            ticker,
-                            info.get("name", ticker),
-                            info.get("date", "")
-                        )
-
-                    # Step 2: Analyze with Gemini (with or without articles)
+                    # Step 2: Analyze with Gemini (articles provide context; Gemini also uses own knowledge)
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({ticker})'})}\n\n"
                     analysis = analyze_with_gemini(ticker, info, articles=articles, model=model)
 
+                    article_sources = list(set(a.get("source", "") for a in articles if a.get("source")))
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
@@ -442,6 +444,7 @@ def analyze_stream():
                         "analysis": analysis,
                         "articles_found": len(articles) > 0,
                         "articles_count": len(articles),
+                        "articles_sources": article_sources,
                         "model_used": model,
                     })
 
@@ -454,6 +457,7 @@ def analyze_stream():
                         "analysis": f"분석 실패: {str(e)}",
                         "articles_found": False,
                         "articles_count": 0,
+                        "articles_sources": [],
                         "model_used": model,
                     })
 
@@ -533,12 +537,80 @@ def fetch_single_ticker(ticker_symbol):
         }
 
 
-def search_news_articles(ticker, company_name, trade_date):
-    """Search for news articles using Google Custom Search API.
+def search_news_articles_yahoo_finance(ticker, company_name):
+    """Search news from Yahoo Finance (no API key required)."""
+    try:
+        url = "https://query1.finance.yahoo.com/v1/finance/search"
+        params = {
+            "q": ticker,
+            "lang": "en-US",
+            "region": "US",
+            "quotesCount": 0,
+            "newsCount": 5,
+        }
+        resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
+        if resp.status_code != 200:
+            return []
 
-    Returns list of article dicts with title, snippet, link.
-    Returns empty list if API not configured or no results found.
-    """
+        data = resp.json()
+        articles = []
+        for item in data.get("news", []):
+            title = item.get("title", "")
+            if title:
+                articles.append({
+                    "title": title,
+                    "snippet": "",
+                    "link": item.get("link", ""),
+                    "source": "Yahoo Finance",
+                })
+        logger.info(f"Yahoo Finance: found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"Yahoo Finance news error for {ticker}: {e}")
+        return []
+
+
+def search_news_articles_newsapi(ticker, company_name):
+    """Search news from NewsAPI.org (requires NEWS_API_KEY)."""
+    if not NEWS_API_KEY:
+        return []
+    try:
+        query = f'"{company_name}" OR "{ticker}" stock'
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": query,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 5,
+            "apiKey": NEWS_API_KEY,
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"NewsAPI error {resp.status_code} for {ticker}")
+            return []
+
+        data = resp.json()
+        articles = []
+        for item in data.get("articles", []):
+            title = item.get("title", "")
+            if title and title != "[Removed]":
+                articles.append({
+                    "title": title,
+                    "snippet": item.get("description", ""),
+                    "link": item.get("url", ""),
+                    "source": "NewsAPI",
+                })
+        logger.info(f"NewsAPI: found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"NewsAPI error for {ticker}: {e}")
+        return []
+
+
+def search_news_articles_google(ticker, company_name, trade_date):
+    """Search news from Google Custom Search API (requires GOOGLE_API_KEY + GOOGLE_CSE_ID)."""
     if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
         return []
 
@@ -550,7 +622,7 @@ def search_news_articles(ticker, company_name, trade_date):
             "cx": GOOGLE_CSE_ID,
             "q": query,
             "num": 5,
-            "dateRestrict": "d3",  # last 3 days
+            "dateRestrict": "d3",
         }
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code != 200:
@@ -560,17 +632,52 @@ def search_news_articles(ticker, company_name, trade_date):
         data = resp.json()
         articles = []
         for item in data.get("items", []):
-            articles.append({
-                "title": item.get("title", ""),
-                "snippet": item.get("snippet", ""),
-                "link": item.get("link", ""),
-            })
-        logger.info(f"Found {len(articles)} articles for {ticker}")
+            title = item.get("title", "")
+            if title:
+                articles.append({
+                    "title": title,
+                    "snippet": item.get("snippet", ""),
+                    "link": item.get("link", ""),
+                    "source": "Google",
+                })
+        logger.info(f"Google CSE: found {len(articles)} articles for {ticker}")
         return articles
 
     except Exception as e:
-        logger.error(f"Error searching news for {ticker}: {e}")
+        logger.error(f"Google CSE error for {ticker}: {e}")
         return []
+
+
+def search_all_news_articles(ticker, company_name, trade_date):
+    """Search news from all available sources and merge results.
+
+    Priority: Yahoo Finance (always) → NewsAPI (if configured) → Google CSE (if configured)
+    Returns up to 10 deduplicated articles.
+    """
+    all_articles = []
+
+    # 1. Yahoo Finance — always available
+    all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
+
+    # 2. NewsAPI — optional
+    if NEWS_API_KEY:
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name))
+
+    # 3. Google CSE — optional
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date))
+
+    # Deduplicate by title
+    seen_titles = set()
+    unique = []
+    for a in all_articles:
+        t = a["title"].strip()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            unique.append(a)
+
+    logger.info(f"Total unique articles for {ticker}: {len(unique)}")
+    return unique[:10]
 
 
 def analyze_with_gemini(ticker, stock_info, articles=None, model=None):
@@ -596,29 +703,32 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None):
 
     # Build prompt based on whether articles were found
     if articles:
+        sources_used = list(set(a.get("source", "") for a in articles if a.get("source")))
+        sources_label = ", ".join(sources_used) if sources_used else "외부 검색"
         articles_text = "\n".join([
-            f"  [{i+1}] {a['title']}\n      {a['snippet']}"
-            for i, a in enumerate(articles[:5])
+            f"  [{i+1}] [{a.get('source', '')}] {a['title']}" +
+            (f"\n      {a['snippet']}" if a.get('snippet') else "")
+            for i, a in enumerate(articles[:8])
         ])
-        prompt = f"""You are a stock market analyst. The following news articles were found for this stock. Use them along with your knowledge to analyze the price movement.
+        prompt = f"""You are a stock market analyst. External news articles were collected from {sources_label} for this stock. Use them as a primary reference, AND also leverage your own latest knowledge to provide a comprehensive analysis.
 
 Stock: {name} ({ticker})
 Change: {change_pct:+.1f}%
 Date: {trade_date}
 
-관련 뉴스 기사:
+외부 수집 뉴스 기사 ({len(articles)}건, 출처: {sources_label}):
 {articles_text}
 
 Instructions:
 1. 출력은 한글로 해라.
-2. 위 뉴스 기사를 참고하여 주가 변동의 핵심 원인을 1-2문장으로 간결하게 분석해라. (명사형 종결)
+2. 위 뉴스 기사를 1차 참고하고, 당신이 알고 있는 최신 정보도 함께 활용하여 주가 변동의 핵심 원인을 1-2문장으로 간결하게 분석해라. (명사형 종결)
 3. 종목명이나 변동률은 출력하지 마라.
-4. 뉴스 기사가 변동 원인과 무관하면 시장 전반 흐름으로 판단해라.
+4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 당신의 지식으로 보완해라.
 5. 예시: "AI 반도체 수요 증가 기대감 및 실적 서프라이즈로 상승"
 6. 한글 분석 후 영어로 한 문장 요약 추가.
 """
     else:
-        prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause using your knowledge and search capabilities.
+        prompt = f"""You are a stock market analyst. No external news articles were found for this stock. Use your own web search capabilities and latest knowledge to analyze the price movement.
 
 Stock: {name} ({ticker})
 Change: {change_pct:+.1f}%
@@ -626,7 +736,7 @@ Date: {trade_date}
 
 Instructions:
 1. 출력은 한글로 해라.
-2. 한글로 1-2문장으로 간결하게 원인을 분석해라. (명사형 종결)
+2. 당신의 최신 지식으로 1-2문장 간결하게 원인을 분석해라. (명사형 종결)
 3. 종목명이나 변동률은 출력하지 마라.
 4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
 5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
