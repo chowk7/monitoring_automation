@@ -14,13 +14,31 @@ document.addEventListener("DOMContentLoaded", () => {
     const errorSection = document.getElementById("errorSection");
     const errorText = document.getElementById("errorText");
 
-    // Load saved tickers on startup
+    // Settings elements
+    const modelSelect = document.getElementById("modelSelect");
+    const saveModelBtn = document.getElementById("saveModelBtn");
+    const settingsToggle = document.getElementById("settingsToggle");
+    const settingsBody = document.getElementById("settingsBody");
+    const newsSearchStatus = document.getElementById("newsSearchStatus");
+
+    // Email elements
+    const emailInput = document.getElementById("emailInput");
+    const addEmailBtn = document.getElementById("addEmailBtn");
+    const emailToggle = document.getElementById("emailToggle");
+    const emailBody = document.getElementById("emailBody");
+    const sendEmailBtn = document.getElementById("sendEmailBtn");
+
+    // Store analysis results for email sending
+    let currentResults = [];
+
+    // Load on startup
     loadTickers();
+    loadSettings();
+    loadEmailRecipients();
 
     // ─── Event Listeners ─────────────────────────────────────────────────
 
     addBtn.addEventListener("click", addTicker);
-
     tickerInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") addTicker();
     });
@@ -31,7 +49,206 @@ document.addEventListener("DOMContentLoaded", () => {
 
     analyzeBtn.addEventListener("click", runAnalysis);
 
-    // ─── Functions ───────────────────────────────────────────────────────
+    // Settings toggle
+    settingsToggle.addEventListener("click", () => {
+        const collapsed = settingsBody.style.display === "none";
+        settingsBody.style.display = collapsed ? "block" : "none";
+        settingsToggle.textContent = collapsed ? "접기 ▲" : "펼치기 ▼";
+    });
+
+    // Save model
+    saveModelBtn.addEventListener("click", saveModel);
+
+    // Email toggle
+    emailToggle.addEventListener("click", () => {
+        const collapsed = emailBody.style.display === "none";
+        emailBody.style.display = collapsed ? "block" : "none";
+        emailToggle.textContent = collapsed ? "접기 ▲" : "펼치기 ▼";
+    });
+
+    // Add email recipient
+    addEmailBtn.addEventListener("click", addEmailRecipient);
+    emailInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") addEmailRecipient();
+    });
+
+    // Send email
+    if (sendEmailBtn) {
+        sendEmailBtn.addEventListener("click", sendEmailReport);
+    }
+
+    // ─── Settings Functions ───────────────────────────────────────────────
+
+    async function loadSettings() {
+        try {
+            const resp = await fetch("/api/settings");
+            const data = await resp.json();
+
+            // Set selected model
+            if (data.gemini_model && modelSelect) {
+                modelSelect.value = data.gemini_model;
+            }
+
+            // Update news search status
+            if (newsSearchStatus) {
+                if (data.has_google_search) {
+                    newsSearchStatus.textContent = "✓ 활성화";
+                    newsSearchStatus.className = "status-badge status-active";
+                } else {
+                    newsSearchStatus.textContent = "✗ 비활성화 (GOOGLE_API_KEY, GOOGLE_CSE_ID 필요)";
+                    newsSearchStatus.className = "status-badge status-inactive";
+                }
+            }
+        } catch (err) {
+            console.error("Failed to load settings:", err);
+        }
+    }
+
+    async function saveModel() {
+        const model = modelSelect.value;
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ gemini_model: model }),
+            });
+            if (resp.ok) {
+                showSuccess(`모델 저장됨: ${model}`);
+            }
+        } catch (err) {
+            showError("모델 저장 실패");
+        }
+    }
+
+    // ─── Email Recipient Functions ────────────────────────────────────────
+
+    async function loadEmailRecipients() {
+        try {
+            const resp = await fetch("/api/email/recipients");
+            const data = await resp.json();
+
+            // Email config warning
+            const configWarning = document.getElementById("emailConfigWarning");
+            if (configWarning) {
+                configWarning.style.display = data.has_email_config ? "none" : "block";
+            }
+
+            // Show/update send email button visibility
+            if (sendEmailBtn) {
+                sendEmailBtn.style.display = data.has_email_config ? "inline-flex" : "none";
+            }
+
+            // Default recipients
+            const defaultSection = document.getElementById("defaultRecipientsSection");
+            const defaultList = document.getElementById("defaultRecipientsList");
+            if (defaultSection && defaultList) {
+                if (data.default_recipients && data.default_recipients.length > 0) {
+                    defaultSection.style.display = "block";
+                    defaultList.innerHTML = data.default_recipients.map(email =>
+                        `<span class="recipient-tag default-tag">${escapeHtml(email)} <small>(기본)</small></span>`
+                    ).join("");
+                } else {
+                    defaultSection.style.display = "none";
+                }
+            }
+
+            // Extra recipients
+            renderExtraRecipients(data.extra_recipients || []);
+
+        } catch (err) {
+            console.error("Failed to load email recipients:", err);
+        }
+    }
+
+    function renderExtraRecipients(recipients) {
+        const list = document.getElementById("extraRecipientsList");
+        if (!list) return;
+
+        if (recipients.length === 0) {
+            list.innerHTML = '<p class="empty-message">추가 수신자가 없습니다.</p>';
+            return;
+        }
+
+        list.innerHTML = recipients.map(email => `
+            <span class="recipient-tag">
+                ${escapeHtml(email)}
+                <button class="remove-btn" data-email="${escapeHtml(email)}" title="삭제">&times;</button>
+            </span>
+        `).join("");
+
+        list.querySelectorAll(".remove-btn").forEach(btn => {
+            btn.addEventListener("click", () => removeEmailRecipient(btn.dataset.email));
+        });
+    }
+
+    async function addEmailRecipient() {
+        const email = emailInput.value.trim();
+        if (!email) return;
+
+        try {
+            const resp = await fetch("/api/email/recipients", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email }),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                renderExtraRecipients(data.extra_recipients);
+                emailInput.value = "";
+                emailInput.focus();
+                showSuccess(`${email} 추가됨`);
+            } else {
+                showError(data.error || "추가 실패");
+            }
+        } catch (err) {
+            showError("서버 오류");
+        }
+    }
+
+    async function removeEmailRecipient(email) {
+        try {
+            const resp = await fetch(`/api/email/recipients/${encodeURIComponent(email)}`, {
+                method: "DELETE",
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                renderExtraRecipients(data.extra_recipients);
+            }
+        } catch (err) {
+            showError("삭제 실패");
+        }
+    }
+
+    async function sendEmailReport() {
+        if (currentResults.length === 0) {
+            showError("전송할 분석 결과가 없습니다. 먼저 분석을 실행해주세요.");
+            return;
+        }
+
+        sendEmailBtn.disabled = true;
+        sendEmailBtn.textContent = "전송 중...";
+
+        try {
+            const resp = await fetch("/api/send-email", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ results: currentResults }),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                showSuccess(`이메일 전송 완료 (${data.count}명)`);
+            } else {
+                showError(data.error || "이메일 전송 실패");
+            }
+        } catch (err) {
+            showError("이메일 전송 오류");
+        } finally {
+            sendEmailBtn.disabled = false;
+            sendEmailBtn.textContent = "✉ 이메일 전송";
+        }
+    }
+
+    // ─── Ticker Functions ─────────────────────────────────────────────────
 
     async function loadTickers() {
         try {
@@ -138,22 +355,23 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // ─── Analysis Functions ───────────────────────────────────────────────
+
     function runAnalysis() {
         hideError();
         resultsSection.style.display = "none";
         loadingSection.style.display = "block";
         analyzeBtn.disabled = true;
 
-        // Reset results area
+        // Reset results
         allStocksOverview.innerHTML = "";
         analysisResults.innerHTML = "";
+        currentResults = [];
 
-        // Accumulated data for streaming
-        let allStocksData = {};
-        let allResults = [];
+        const selectedModel = modelSelect ? modelSelect.value : "gemini-2.5-pro";
 
         // Use SSE for streaming
-        const eventSource = new EventSource("/api/analyze/stream");
+        const eventSource = new EventSource(`/api/analyze/stream?model=${encodeURIComponent(selectedModel)}`);
 
         eventSource.onmessage = function(event) {
             try {
@@ -162,32 +380,34 @@ document.addEventListener("DOMContentLoaded", () => {
                 switch (data.type) {
                     case "progress":
                         loadingText.textContent = data.message;
-                        // Update progress bar based on message content
+                        // Update progress bar
                         if (data.message.includes("주가 수집")) {
-                            progressFill.style.width = "30%";
+                            progressFill.style.width = "20%";
                         } else if (data.message.includes("분석 시작")) {
-                            progressFill.style.width = "50%";
-                        } else if (data.message.includes("분석 중") || data.message.includes("Gemini")) {
+                            progressFill.style.width = "40%";
+                        } else if (data.message.includes("뉴스 기사 검색")) {
+                            progressFill.style.width = "55%";
+                        } else if (data.message.includes("Gemini 분석")) {
+                            progressFill.style.width = "75%";
+                        } else if (data.message.includes("분석 중")) {
                             const match = data.message.match(/\((\d+)\/(\d+)\)/);
                             if (match) {
                                 const current = parseInt(match[1]);
                                 const total = parseInt(match[2]);
-                                const pct = 50 + (current / total) * 45;
+                                const pct = 40 + (current / total) * 55;
                                 progressFill.style.width = pct + "%";
                             }
                         }
                         break;
 
                     case "stocks":
-                        // Received all_stocks data - render overview
                         allStocksData = data.all_stocks;
                         resultsSection.style.display = "block";
                         renderAllStocksOverview(allStocksData);
                         break;
 
                     case "results":
-                        // Received batch of analysis results - append to display
-                        allResults = allResults.concat(data.results);
+                        currentResults = currentResults.concat(data.results);
                         appendAnalysisResults(data.results);
                         break;
 
@@ -201,8 +421,12 @@ document.addEventListener("DOMContentLoaded", () => {
                             progressFill.style.width = "0%";
                             analyzeBtn.disabled = false;
 
-                            // Show message if no filtered results
-                            if (allResults.length === 0 && data.message) {
+                            // Show send email button if results exist
+                            if (sendEmailBtn && currentResults.length > 0) {
+                                sendEmailBtn.style.display = "inline-flex";
+                            }
+
+                            if (currentResults.length === 0 && data.message) {
                                 analysisResults.innerHTML = `
                                     <div class="no-filter-message">
                                         <p>${escapeHtml(data.message)}</p>
@@ -223,7 +447,7 @@ document.addEventListener("DOMContentLoaded", () => {
             eventSource.close();
             loadingSection.style.display = "none";
             analyzeBtn.disabled = false;
-            showError("Server error during analysis. Please try again.");
+            showError("분석 중 오류가 발생했습니다. 다시 시도해주세요.");
         };
     }
 
@@ -261,13 +485,23 @@ document.addEventListener("DOMContentLoaded", () => {
             const cls = result.change_pct > 0 ? "positive" : "negative";
             const sign = result.change_pct > 0 ? "+" : "";
             const analysisHtml = formatAnalysis(result.analysis);
+            const modelLabel = result.model_used || "Gemini";
+
+            // News badge
+            let newsBadge = "";
+            if (result.articles_found) {
+                newsBadge = `<span class="news-badge">📰 뉴스 ${result.articles_count}건 참고</span>`;
+            } else {
+                newsBadge = `<span class="news-badge news-badge-none">Gemini 자체 분석</span>`;
+            }
 
             html += `
                 <div class="result-card ${cls}">
                     <div class="result-header">
                         <span class="result-name">${escapeHtml(result.name)}</span>
                         <span class="result-change ${cls}">${sign}${result.change_pct.toFixed(1)}%</span>
-                        <span class="result-meta">Gemini 2.5 Pro 분석</span>
+                        ${newsBadge}
+                        <span class="result-meta">${escapeHtml(modelLabel)}</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
                 </div>
@@ -284,27 +518,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function formatAnalysis(text) {
         if (!text) return "<p>분석 결과 없음</p>";
-        // Split by double newlines or single newlines for paragraphs
         const paragraphs = text.split(/\n{2,}/).filter(Boolean);
         if (paragraphs.length <= 1) {
-            // Try single newlines
             const lines = text.split(/\n/).filter(Boolean);
             return lines.map(l => `<p>${escapeHtml(l)}</p>`).join("");
         }
         return paragraphs.map(p => `<p>${escapeHtml(p.trim())}</p>`).join("");
     }
 
+    // ─── Utility Functions ────────────────────────────────────────────────
+
     function showError(msg) {
         errorSection.style.display = "block";
         errorText.textContent = msg;
-        errorSection.className = "error-section";
+        errorSection.className = "card error-section";
         setTimeout(() => { errorSection.style.display = "none"; }, 5000);
     }
 
     function showSuccess(msg) {
         errorSection.style.display = "block";
         errorText.textContent = msg;
-        errorSection.className = "error-section success";
+        errorSection.className = "card error-section success";
         setTimeout(() => { errorSection.style.display = "none"; }, 3000);
     }
 

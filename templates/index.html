@@ -39,6 +39,65 @@
             </button>
         </section>
 
+        <!-- Settings Section -->
+        <section class="card settings-section">
+            <div class="section-header">
+                <h2>분석 설정</h2>
+                <button class="btn btn-toggle" id="settingsToggle">접기 ▲</button>
+            </div>
+            <div id="settingsBody">
+                <!-- Gemini Model Selection -->
+                <div class="settings-row">
+                    <label for="modelSelect">Gemini 모델</label>
+                    <select id="modelSelect" class="model-select">
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (기본값)</option>
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (빠름)</option>
+                        <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (최고속)</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                        <option value="gemini-3-pro">Gemini 3 Pro (최신)</option>
+                    </select>
+                    <button id="saveModelBtn" class="btn btn-save-model">저장</button>
+                </div>
+
+                <!-- News Search Status -->
+                <div class="settings-row">
+                    <label>뉴스 기사 검색</label>
+                    <span id="newsSearchStatus" class="status-badge status-unknown">확인 중...</span>
+                    <small class="settings-hint">Google Custom Search API로 기사 먼저 검색 후 Gemini 분석</small>
+                </div>
+            </div>
+        </section>
+
+        <!-- Email Recipients Section -->
+        <section class="card email-section">
+            <div class="section-header">
+                <h2>이메일 수신자</h2>
+                <button class="btn btn-toggle" id="emailToggle">접기 ▲</button>
+            </div>
+            <div id="emailBody">
+                <div id="emailConfigWarning" class="config-warning" style="display:none;">
+                    ⚠️ SMTP 설정이 없습니다. SMTP_USER, SMTP_PASSWORD 환경변수를 설정해야 이메일 발송이 가능합니다.
+                </div>
+
+                <!-- Default recipients (from ENV) -->
+                <div id="defaultRecipientsSection" style="display:none;">
+                    <p class="recipients-label">기본 수신자 (환경변수 EMAIL_TO)</p>
+                    <div id="defaultRecipientsList" class="recipients-list"></div>
+                </div>
+
+                <!-- Extra recipients (manual input) -->
+                <p class="recipients-label">추가 수신자 (수동 입력)</p>
+                <div class="input-group">
+                    <input type="email" id="emailInput" placeholder="이메일 주소 입력 (예: user@example.com)"
+                           autocomplete="off">
+                    <button id="addEmailBtn" class="btn btn-add">추가</button>
+                </div>
+                <div id="extraRecipientsList" class="recipients-list">
+                    <p class="empty-message">추가 수신자가 없습니다.</p>
+                </div>
+            </div>
+        </section>
+
         <!-- Loading Section -->
         <section id="loadingSection" class="card loading-section" style="display:none;">
             <div class="spinner"></div>
@@ -50,7 +109,12 @@
 
         <!-- Results Section -->
         <section id="resultsSection" class="card results-section" style="display:none;">
-            <h2>분석 결과</h2>
+            <div class="section-header">
+                <h2>분석 결과</h2>
+                <button id="sendEmailBtn" class="btn btn-email" style="display:none;">
+                    ✉ 이메일 전송
+                </button>
+            </div>
 
             <!-- All stocks overview -->
             <div id="allStocksOverview" class="stocks-overview"></div>

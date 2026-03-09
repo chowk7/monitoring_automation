@@ -449,6 +449,220 @@ header h1 {
     color: #34d399;
 }
 
+/* ─── Settings Section ────────────────────────────────────────────────────── */
+.settings-section .section-header,
+.email-section .section-header {
+    margin-bottom: 16px;
+}
+
+.btn-toggle {
+    padding: 4px 12px;
+    background: transparent;
+    border: 1px solid #2a3a4a;
+    color: #7a8a9e;
+    font-size: 0.8rem;
+    margin-left: auto;
+    border-radius: 6px;
+}
+
+.btn-toggle:hover {
+    background: #253547;
+    color: #a3bfdb;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #2a3a4a;
+    flex-wrap: wrap;
+}
+
+.settings-row:last-child {
+    border-bottom: none;
+}
+
+.settings-row label {
+    font-size: 0.9rem;
+    color: #a3bfdb;
+    font-weight: 600;
+    min-width: 130px;
+}
+
+.model-select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    background: #0f1923;
+    color: #e0e6ed;
+    font-size: 0.9rem;
+    outline: none;
+    cursor: pointer;
+}
+
+.model-select:focus {
+    border-color: #3b82f6;
+}
+
+.btn-save-model {
+    padding: 8px 16px;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.btn-save-model:hover {
+    background: #2563eb;
+}
+
+.settings-hint {
+    font-size: 0.78rem;
+    color: #5a6a7a;
+    width: 100%;
+    margin-top: 2px;
+}
+
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.status-active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-inactive {
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    font-size: 0.75rem;
+}
+
+.status-unknown {
+    background: rgba(107, 114, 128, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+/* ─── Email Section ───────────────────────────────────────────────────────── */
+.config-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #fbbf24;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+}
+
+.recipients-label {
+    font-size: 0.85rem;
+    color: #7a8a9e;
+    font-weight: 600;
+    margin: 14px 0 8px 0;
+}
+
+.recipients-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 36px;
+    margin-bottom: 16px;
+}
+
+.recipient-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #253547;
+    border: 1px solid #2a3a4a;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: #a3bfdb;
+}
+
+.recipient-tag.default-tag {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.25);
+    color: #93c5fd;
+}
+
+.recipient-tag.default-tag small {
+    color: #6b7280;
+    font-size: 0.75rem;
+}
+
+.recipient-tag .remove-btn {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: #5a6a7a;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    transition: all 0.15s;
+}
+
+.recipient-tag .remove-btn:hover {
+    background: #ef4444;
+    color: #fff;
+}
+
+/* ─── News Badge ──────────────────────────────────────────────────────────── */
+.news-badge {
+    font-size: 0.75rem;
+    padding: 3px 9px;
+    border-radius: 12px;
+    font-weight: 600;
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.news-badge-none {
+    background: rgba(107, 114, 128, 0.1);
+    color: #9ca3af;
+    border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+/* ─── Email Button ────────────────────────────────────────────────────────── */
+.btn-email {
+    padding: 8px 18px;
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    color: #fff;
+    font-size: 0.9rem;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.btn-email:hover:not(:disabled) {
+    background: linear-gradient(135deg, #4f46e5, #4338ca);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.btn-email:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* ─── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
     .container {

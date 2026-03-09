@@ -3,7 +3,10 @@ import gc
 import csv
 import json
 import logging
+import smtplib
 from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
@@ -24,9 +27,30 @@ logger = logging.getLogger(__name__)
 
 # CSV file for ticker storage
 TICKERS_CSV_FILE = "tickers.csv"
+SETTINGS_FILE = "settings.json"
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+
+# Email configuration
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USER)
+EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients
+
+# Available Gemini models
+AVAILABLE_GEMINI_MODELS = [
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro (기본값)"},
+    {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (빠름)"},
+    {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite (최고속)"},
+    {"id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro"},
+    {"id": "gemini-3-pro", "label": "Gemini 3 Pro (최신)"},
+]
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
@@ -49,6 +73,33 @@ def get_gemini_client():
     if _gemini_client is None and GEMINI_API_KEY:
         _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     return _gemini_client
+
+
+# ─── Settings Management ──────────────────────────────────────────────────────
+
+def load_settings():
+    """Load settings from JSON file."""
+    defaults = {
+        "gemini_model": DEFAULT_GEMINI_MODEL,
+        "email_recipients": [],
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                defaults.update(data)
+        except Exception as e:
+            logger.error(f"Error reading settings: {e}")
+    return defaults
+
+
+def save_settings(settings):
+    """Save settings to JSON file."""
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error writing settings: {e}")
 
 
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
@@ -146,12 +197,169 @@ def clear_tickers():
     return jsonify({"tickers": [], "message": "All tickers cleared"})
 
 
+# ─── Settings Routes ──────────────────────────────────────────────────────────
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    settings = load_settings()
+    settings["available_models"] = AVAILABLE_GEMINI_MODELS
+    settings["has_google_search"] = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
+    settings["has_email"] = bool(SMTP_USER and SMTP_PASSWORD)
+    return jsonify(settings)
+
+
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    data = request.get_json()
+    settings = load_settings()
+    if "gemini_model" in data:
+        settings["gemini_model"] = data["gemini_model"]
+    save_settings(settings)
+    return jsonify(settings)
+
+
+# ─── Email Recipients Routes ──────────────────────────────────────────────────
+
+@app.route("/api/email/recipients", methods=["GET"])
+def get_email_recipients():
+    settings = load_settings()
+    default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
+    extra_list = settings.get("email_recipients", [])
+    return jsonify({
+        "default_recipients": default_list,
+        "extra_recipients": extra_list,
+        "has_email_config": bool(SMTP_USER and SMTP_PASSWORD),
+    })
+
+
+@app.route("/api/email/recipients", methods=["POST"])
+def add_email_recipient():
+    data = request.get_json()
+    email_addr = data.get("email", "").strip().lower()
+    if not email_addr or "@" not in email_addr:
+        return jsonify({"error": "유효한 이메일 주소를 입력해주세요"}), 400
+
+    settings = load_settings()
+    recipients = settings.get("email_recipients", [])
+    if email_addr in recipients:
+        return jsonify({"error": f"{email_addr} 는 이미 등록되어 있습니다"}), 400
+
+    recipients.append(email_addr)
+    settings["email_recipients"] = recipients
+    save_settings(settings)
+    return jsonify({"extra_recipients": recipients})
+
+
+@app.route("/api/email/recipients/<path:email_addr>", methods=["DELETE"])
+def delete_email_recipient(email_addr):
+    settings = load_settings()
+    recipients = settings.get("email_recipients", [])
+    email_addr = email_addr.lower()
+    if email_addr in recipients:
+        recipients.remove(email_addr)
+        settings["email_recipients"] = recipients
+        save_settings(settings)
+    return jsonify({"extra_recipients": recipients})
+
+
+@app.route("/api/send-email", methods=["POST"])
+def send_email_report():
+    """Send analysis results via email."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return jsonify({"error": "이메일 설정이 구성되지 않았습니다. SMTP_USER, SMTP_PASSWORD 환경변수를 설정해주세요."}), 400
+
+    data = request.get_json()
+    results = data.get("results", [])
+    extra_to = data.get("extra_to", [])  # Additional one-time recipients from request
+
+    if not results:
+        return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
+
+    # Build recipient list
+    settings = load_settings()
+    default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
+    extra_list = settings.get("email_recipients", [])
+    all_recipients = list(set(default_list + extra_list + extra_to))
+
+    if not all_recipients:
+        return jsonify({"error": "수신자 이메일이 없습니다. 수신자를 추가해주세요."}), 400
+
+    # Build HTML email
+    today = datetime.now().strftime("%Y-%m-%d")
+    subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {today}"
+    html_body = build_email_html(results, today)
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_FROM or SMTP_USER
+        msg["To"] = ", ".join(all_recipients)
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+
+        return jsonify({"success": True, "sent_to": all_recipients, "count": len(all_recipients)})
+
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"error": "SMTP 인증 실패. 이메일/비밀번호를 확인해주세요."}), 400
+    except Exception as e:
+        logger.error(f"Email send error: {e}")
+        return jsonify({"error": f"이메일 전송 실패: {str(e)}"}), 500
+
+
+def build_email_html(results, date_str):
+    """Build HTML content for email report."""
+    rows = ""
+    for r in results:
+        sign = "+" if r["change_pct"] > 0 else ""
+        color = "#10b981" if r["change_pct"] > 0 else "#ef4444"
+        analysis_text = r.get("analysis", "").replace("\n", "<br>")
+        news_badge = ""
+        if r.get("articles_found"):
+            news_badge = '<span style="background:#3b82f6;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;margin-left:6px;">뉴스 참고</span>'
+        rows += f"""
+        <tr>
+            <td style="padding:12px;border-bottom:1px solid #2a3a4a;">
+                <strong>{r['name']}</strong> ({r['ticker']})
+                <span style="color:{color};font-weight:bold;margin-left:8px;">{sign}{r['change_pct']:.1f}%</span>
+                {news_badge}
+                <br><small style="color:#aaa;">{r.get('model_used', 'Gemini')}</small>
+                <div style="margin-top:8px;color:#ccc;line-height:1.5;">{analysis_text}</div>
+            </td>
+        </tr>
+        """
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"></head>
+    <body style="background:#0f1923;color:#e0e6ed;font-family:Arial,sans-serif;margin:0;padding:20px;">
+        <div style="max-width:700px;margin:0 auto;">
+            <h1 style="color:#3b82f6;margin-bottom:4px;">Stock Movement Analyzer</h1>
+            <p style="color:#aaa;margin-top:0;">분석 날짜: {date_str}</p>
+            <table style="width:100%;border-collapse:collapse;background:#1a2634;border-radius:8px;overflow:hidden;">
+                {rows}
+            </table>
+            <p style="color:#555;font-size:12px;margin-top:16px;">This report was automatically generated by Stock Movement Analyzer.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
     tickers = load_tickers_from_csv()
     if not tickers:
         return jsonify({"error": "No tickers saved."}), 400
+
+    settings = load_settings()
+    model = request.args.get("model", settings.get("gemini_model", DEFAULT_GEMINI_MODEL))
 
     def generate():
         log_memory("STREAM START")
@@ -166,7 +374,6 @@ def analyze_stream():
             batch = tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
             batch_num = batch_idx // FETCH_BATCH_SIZE + 1
 
-            # Send progress
             yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
 
             for ticker in batch:
@@ -197,7 +404,9 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks in batches using Gemini
+        has_search = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
+
+        # Phase 2: Analyze filtered stocks in batches
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
 
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
@@ -206,18 +415,34 @@ def analyze_stream():
 
             log_memory(f"ANALYSIS BATCH {batch_num}")
 
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
 
             batch_results = []
             for ticker, info in batch:
                 try:
-                    analysis = analyze_with_gemini(ticker, info)
+                    articles = []
+
+                    # Step 1: Search news articles if Google Search API is configured
+                    if has_search:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
+                        articles = search_news_articles(
+                            ticker,
+                            info.get("name", ticker),
+                            info.get("date", "")
+                        )
+
+                    # Step 2: Analyze with Gemini (with or without articles)
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({ticker})'})}\n\n"
+                    analysis = analyze_with_gemini(ticker, info, articles=articles, model=model)
 
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": analysis,
+                        "articles_found": len(articles) > 0,
+                        "articles_count": len(articles),
+                        "model_used": model,
                     })
 
                 except Exception as e:
@@ -226,7 +451,10 @@ def analyze_stream():
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
-                        "analysis": f"Analysis failed: {str(e)}",
+                        "analysis": f"분석 실패: {str(e)}",
+                        "articles_found": False,
+                        "articles_count": 0,
+                        "model_used": model,
                     })
 
                 gc.collect()
@@ -234,7 +462,6 @@ def analyze_stream():
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
 
-            # Clear batch data
             del batch_results
             gc.collect()
 
@@ -306,8 +533,52 @@ def fetch_single_ticker(ticker_symbol):
         }
 
 
-def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro to analyze stock price movement."""
+def search_news_articles(ticker, company_name, trade_date):
+    """Search for news articles using Google Custom Search API.
+
+    Returns list of article dicts with title, snippet, link.
+    Returns empty list if API not configured or no results found.
+    """
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        return []
+
+    try:
+        query = f'"{company_name}" OR "{ticker}" stock news'
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "key": GOOGLE_API_KEY,
+            "cx": GOOGLE_CSE_ID,
+            "q": query,
+            "num": 5,
+            "dateRestrict": "d3",  # last 3 days
+        }
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Google Search API error {resp.status_code} for {ticker}")
+            return []
+
+        data = resp.json()
+        articles = []
+        for item in data.get("items", []):
+            articles.append({
+                "title": item.get("title", ""),
+                "snippet": item.get("snippet", ""),
+                "link": item.get("link", ""),
+            })
+        logger.info(f"Found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"Error searching news for {ticker}: {e}")
+        return []
+
+
+def analyze_with_gemini(ticker, stock_info, articles=None, model=None):
+    """Use Gemini to analyze stock price movement.
+
+    If articles are provided (from Google Search), includes them in the prompt.
+    If no articles, instructs Gemini to use its own knowledge/search.
+    """
     if not GEMINI_API_KEY:
         return "Gemini API key not configured."
 
@@ -315,11 +586,39 @@ def analyze_with_gemini(ticker, stock_info):
     if not client:
         return "Gemini client initialization failed."
 
+    if model is None:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
     name = stock_info.get("name", ticker)
     change_pct = stock_info["change_pct"]
     trade_date = stock_info.get("date", "")
 
-    prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause.
+    # Build prompt based on whether articles were found
+    if articles:
+        articles_text = "\n".join([
+            f"  [{i+1}] {a['title']}\n      {a['snippet']}"
+            for i, a in enumerate(articles[:5])
+        ])
+        prompt = f"""You are a stock market analyst. The following news articles were found for this stock. Use them along with your knowledge to analyze the price movement.
+
+Stock: {name} ({ticker})
+Change: {change_pct:+.1f}%
+Date: {trade_date}
+
+관련 뉴스 기사:
+{articles_text}
+
+Instructions:
+1. 출력은 한글로 해라.
+2. 위 뉴스 기사를 참고하여 주가 변동의 핵심 원인을 1-2문장으로 간결하게 분석해라. (명사형 종결)
+3. 종목명이나 변동률은 출력하지 마라.
+4. 뉴스 기사가 변동 원인과 무관하면 시장 전반 흐름으로 판단해라.
+5. 예시: "AI 반도체 수요 증가 기대감 및 실적 서프라이즈로 상승"
+6. 한글 분석 후 영어로 한 문장 요약 추가.
+"""
+    else:
+        prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause using your knowledge and search capabilities.
 
 Stock: {name} ({ticker})
 Change: {change_pct:+.1f}%
@@ -336,12 +635,12 @@ Instructions:
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model=model,
             contents=prompt,
         )
         return response.text
     except Exception as e:
-        return f"Analysis failed: {str(e)}"
+        return f"분석 실패: {str(e)}"
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
