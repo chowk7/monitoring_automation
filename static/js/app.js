@@ -656,9 +656,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 newsBadge = `<span class="news-badge news-badge-none">Gemini 자체 분석</span>`;
             }
 
-            // Article links
+            // Article links (숨김: 개별이슈 미발견인 경우)
+            const isNoIssue = (result.analysis || "").trim().startsWith("개별이슈 미발견");
             let articlesHtml = "";
-            if (result.articles && result.articles.length > 0) {
+            if (!isNoIssue && result.articles && result.articles.length > 0) {
                 const articleItems = result.articles.map(a => {
                     const datePart = a.date
                         ? `<span class="article-date">${escapeHtml(a.date)}</span>`
