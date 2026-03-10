@@ -13,6 +13,46 @@
             <p class="subtitle">전일 주가 변동 원인 분석기</p>
         </header>
 
+        <!-- Global Indices Section -->
+        <section class="card indices-section">
+            <div class="section-header">
+                <h2>글로벌 주요 지수</h2>
+                <span id="indicesDate" class="indices-date"></span>
+                <button id="indicesBtn" class="btn btn-indices">조회</button>
+            </div>
+
+            <!-- Loading -->
+            <div id="indicesLoading" style="display:none;">
+                <div class="spinner small-spinner"></div>
+                <p id="indicesLoadingText" class="indices-loading-text">데이터 수집 중...</p>
+            </div>
+
+            <!-- Index Tables -->
+            <div id="indicesData" style="display:none;">
+                <div class="indices-regions">
+                    <div class="indices-region">
+                        <h3 class="region-title us-title">🇺🇸 미국</h3>
+                        <div id="usIndices" class="index-list"></div>
+                    </div>
+                    <div class="indices-region">
+                        <h3 class="region-title asia-title">🌏 아시아</h3>
+                        <div id="asiaIndices" class="index-list"></div>
+                    </div>
+                    <div class="indices-region">
+                        <h3 class="region-title eu-title">🇪🇺 유럽</h3>
+                        <div id="euIndices" class="index-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- News Summary -->
+            <div id="indicesNews" style="display:none;">
+                <div class="news-divider"></div>
+                <h3 class="news-title">뉴스 &amp; 시장 분석 <span class="news-badge">Gemini 2.5 Pro</span></h3>
+                <div id="newsSummaryText" class="news-content"></div>
+            </div>
+        </section>
+
         <!-- Ticker Input Section -->
         <section class="card ticker-input-section">
             <h2>Ticker 등록</h2>

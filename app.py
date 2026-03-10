@@ -344,6 +344,153 @@ Instructions:
         return f"Analysis failed: {str(e)}"
 
 
+# ─── Global Indices ───────────────────────────────────────────────────────────
+
+GLOBAL_INDICES = {
+    "미국": [
+        {"symbol": "^DJI",  "name": "다우존스 (DOW)"},
+        {"symbol": "^IXIC", "name": "나스닥 (NASDAQ)"},
+        {"symbol": "^GSPC", "name": "S&P 500"},
+        {"symbol": "^SOX",  "name": "필라델피아 반도체 (SOX)"},
+    ],
+    "아시아": [
+        {"symbol": "^KS11",     "name": "KOSPI"},
+        {"symbol": "^KQ11",     "name": "KOSDAQ"},
+        {"symbol": "000001.SS", "name": "상해종합 (Shanghai)"},
+        {"symbol": "^HSI",      "name": "항셍 (Hang Seng)"},
+        {"symbol": "^N225",     "name": "니케이 (Nikkei 225)"},
+    ],
+    "유럽": [
+        {"symbol": "^FTSE",  "name": "영국 FTSE 100"},
+        {"symbol": "^FCHI",  "name": "프랑스 CAC 40"},
+        {"symbol": "^GDAXI", "name": "독일 DAX"},
+    ],
+}
+
+
+def fetch_index_data(symbol, name):
+    """Fetch a single index's price data from Yahoo Finance."""
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+        params = {"range": "5d", "interval": "1d"}
+        resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
+
+        if resp.status_code != 200:
+            return {"symbol": symbol, "name": name, "error": f"HTTP {resp.status_code}"}
+
+        data = resp.json()
+        result = data["chart"]["result"][0]
+        closes = result["indicators"]["quote"][0]["close"]
+        timestamps = result["timestamp"]
+
+        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+
+        if len(valid) < 2:
+            return {"symbol": symbol, "name": name, "error": "데이터 부족"}
+
+        prev_close = valid[-2][1]
+        last_close = valid[-1][1]
+        change = last_close - prev_close
+        change_pct = (change / prev_close) * 100
+        last_date = datetime.fromtimestamp(valid[-1][0]).strftime("%Y-%m-%d")
+
+        return {
+            "symbol": symbol,
+            "name": name,
+            "value": round(float(last_close), 2),
+            "change": round(float(change), 2),
+            "change_pct": round(float(change_pct), 2),
+            "date": last_date,
+        }
+    except Exception as e:
+        return {"symbol": symbol, "name": name, "error": str(e)}
+
+
+def get_indices_news_summary(indices_data):
+    """Use Gemini to generate news & market analysis for global indices."""
+    if not GEMINI_API_KEY:
+        return "Gemini API key가 설정되지 않았습니다."
+
+    client = get_gemini_client()
+    if not client:
+        return "Gemini 클라이언트 초기화 실패."
+
+    context_lines = []
+    for region, indices in indices_data.items():
+        context_lines.append(f"\n[{region}]")
+        for idx in indices:
+            if "error" not in idx:
+                sign = "+" if idx["change_pct"] >= 0 else ""
+                context_lines.append(
+                    f"  - {idx['name']}: {idx['value']:,.2f} ({sign}{idx['change_pct']:.2f}%)"
+                )
+            else:
+                context_lines.append(f"  - {idx['name']}: 데이터 오류")
+
+    context = "\n".join(context_lines)
+    today = datetime.now().strftime("%Y년 %m월 %d일")
+
+    prompt = f"""당신은 글로벌 금융 시장 전문 애널리스트입니다.
+오늘 날짜: {today}
+
+아래는 주요 글로벌 주가 지수 현황입니다:
+{context}
+
+위 지수들의 움직임을 분석하고, 각 지역별 주요 이슈와 뉴스를 한글로 정리해주세요.
+
+출력 형식 (마크다운):
+## 미국 시장
+- 핵심 이슈 2-3가지 (지수 움직임 원인, 최신 경제 이벤트/정책/실적 기반)
+
+## 아시아 시장
+- 핵심 이슈 2-3가지
+
+## 유럽 시장
+- 핵심 이슈 2-3가지
+
+## 종합 시장 분위기
+1-2문장으로 전체 시장 분위기 요약.
+
+각 이슈는 구체적 근거(연준 정책, 환율, 무역, 실적 시즌 등)를 포함하고 간결하게 작성하세요.
+"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=prompt,
+        )
+        return response.text
+    except Exception as e:
+        return f"뉴스 분석 실패: {str(e)}"
+
+
+@app.route("/api/indices/stream", methods=["GET"])
+def indices_stream():
+    """SSE endpoint: fetch global index prices then Gemini news summary."""
+
+    def generate():
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 데이터 수집 중...'})}\n\n"
+
+        all_indices_data = {}
+        for region, indices in GLOBAL_INDICES.items():
+            region_data = []
+            for idx in indices:
+                result = fetch_index_data(idx["symbol"], idx["name"])
+                region_data.append(result)
+            all_indices_data[region] = region_data
+
+        yield f"data: {json.dumps({'type': 'indices', 'data': all_indices_data})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': 'Gemini로 뉴스 & 시장 분석 중...'})}\n\n"
+
+        news_summary = get_indices_news_summary(all_indices_data)
+        yield f"data: {json.dumps({'type': 'news', 'summary': news_summary})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

@@ -1,3 +1,152 @@
+// ─── Shared Utilities ─────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ─── Global Indices ───────────────────────────────────────────────────────────
+
+document.addEventListener("DOMContentLoaded", () => {
+    const indicesBtn        = document.getElementById("indicesBtn");
+    const indicesLoading    = document.getElementById("indicesLoading");
+    const indicesLoadingText= document.getElementById("indicesLoadingText");
+    const indicesData       = document.getElementById("indicesData");
+    const indicesNews       = document.getElementById("indicesNews");
+    const indicesDate       = document.getElementById("indicesDate");
+    const newsSummaryText   = document.getElementById("newsSummaryText");
+    const usIndices         = document.getElementById("usIndices");
+    const asiaIndices       = document.getElementById("asiaIndices");
+    const euIndices         = document.getElementById("euIndices");
+
+    const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
+
+    if (indicesBtn) {
+        indicesBtn.addEventListener("click", fetchIndices);
+    }
+
+    function fetchIndices() {
+        indicesBtn.disabled = true;
+        indicesData.style.display = "none";
+        indicesNews.style.display = "none";
+        indicesLoading.style.display = "block";
+        indicesLoadingText.textContent = "데이터 수집 중...";
+        newsSummaryText.innerHTML = "";
+        [usIndices, asiaIndices, euIndices].forEach(el => { el.innerHTML = ""; });
+
+        const es = new EventSource("/api/indices/stream");
+
+        es.onmessage = function(event) {
+            try {
+                const msg = JSON.parse(event.data);
+
+                switch (msg.type) {
+                    case "progress":
+                        indicesLoadingText.textContent = msg.message;
+                        break;
+
+                    case "indices":
+                        renderIndices(msg.data);
+                        indicesLoading.style.display = "none";
+                        indicesData.style.display = "block";
+                        break;
+
+                    case "news":
+                        renderNews(msg.summary);
+                        indicesNews.style.display = "block";
+                        break;
+
+                    case "done":
+                        es.close();
+                        indicesLoading.style.display = "none";
+                        indicesBtn.disabled = false;
+                        break;
+                }
+            } catch (err) {
+                console.error("Indices SSE parse error:", err);
+            }
+        };
+
+        es.onerror = function() {
+            es.close();
+            indicesLoading.style.display = "none";
+            indicesBtn.disabled = false;
+            indicesLoadingText.textContent = "오류 발생. 다시 시도해주세요.";
+            indicesLoading.style.display = "block";
+        };
+    }
+
+    function renderIndices(data) {
+        let latestDate = "";
+
+        for (const [region, indices] of Object.entries(data)) {
+            const container = REGION_CONTAINERS[region];
+            if (!container) continue;
+
+            container.innerHTML = "";
+            for (const idx of indices) {
+                if (idx.error) {
+                    const el = document.createElement("div");
+                    el.className = "index-error";
+                    el.textContent = `${escapeHtml(idx.name)}: 오류`;
+                    container.appendChild(el);
+                    continue;
+                }
+
+                if (idx.date && idx.date > latestDate) latestDate = idx.date;
+
+                const sign = idx.change_pct >= 0 ? "+" : "";
+                const cls  = idx.change_pct > 0 ? "positive" : idx.change_pct < 0 ? "negative" : "neutral";
+                const val  = idx.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                const row = document.createElement("div");
+                row.className = "index-row";
+                row.innerHTML = `
+                    <span class="index-name" title="${escapeHtml(idx.name)}">${escapeHtml(idx.name)}</span>
+                    <span class="index-value">${val}</span>
+                    <span class="index-change ${cls}">${sign}${idx.change_pct.toFixed(2)}%</span>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        if (latestDate && indicesDate) {
+            indicesDate.textContent = `(${latestDate} 기준)`;
+        }
+    }
+
+    function renderNews(summary) {
+        // Convert basic markdown (## heading, - list, plain text) to HTML
+        const lines = summary.split("\n");
+        let html = "";
+        let inUl = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                continue;
+            }
+            if (trimmed.startsWith("## ")) {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                html += `<h2>${escapeHtml(trimmed.slice(3))}</h2>`;
+            } else if (trimmed.startsWith("- ")) {
+                if (!inUl) { html += "<ul>"; inUl = true; }
+                html += `<li>${escapeHtml(trimmed.slice(2))}</li>`;
+            } else {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                html += `<p>${escapeHtml(trimmed)}</p>`;
+            }
+        }
+        if (inUl) html += "</ul>";
+
+        newsSummaryText.innerHTML = html;
+    }
+});
+
+// ─── Stock Ticker Analyzer ────────────────────────────────────────────────────
+
 document.addEventListener("DOMContentLoaded", () => {
     const tickerInput = document.getElementById("tickerInput");
     const addBtn = document.getElementById("addBtn");
@@ -312,9 +461,4 @@ document.addEventListener("DOMContentLoaded", () => {
         errorSection.style.display = "none";
     }
 
-    function escapeHtml(str) {
-        const div = document.createElement("div");
-        div.textContent = str;
-        return div.innerHTML;
-    }
 });
