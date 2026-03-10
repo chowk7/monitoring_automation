@@ -958,3 +958,108 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     padding: 1px 7px;
     margin-bottom: 6px;
 }
+
+/* ─── Global Market Indices ──────────────────────────────────────────────────── */
+#marketIndicesSection {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #2a3a4a;
+}
+
+.market-indices-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.market-index-item {
+    background: #0f1923;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 8px 14px;
+    min-width: 130px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.market-index-item .idx-region {
+    font-size: 0.65rem;
+    color: #5a6a7a;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.market-index-item .idx-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e0e6ed;
+}
+
+.market-index-item .idx-change {
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.market-index-item.positive { border-color: #10b981; }
+.market-index-item.positive .idx-change { color: #10b981; }
+.market-index-item.negative { border-color: #ef4444; }
+.market-index-item.negative .idx-change { color: #ef4444; }
+.market-index-item.neutral .idx-change { color: #7a8a9e; }
+.market-index-item.error .idx-change { color: #5a6a7a; font-size: 0.75rem; }
+
+.market-analysis-box {
+    background: #0f1923;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #c0cdd8;
+    line-height: 1.65;
+    font-size: 0.88rem;
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+}
+
+.market-articles-section {
+    margin-top: 8px;
+}
+
+.market-articles-section h4 {
+    font-size: 0.8rem;
+    color: #60a5fa;
+    margin-bottom: 6px;
+}
+
+.market-articles-region {
+    margin-bottom: 8px;
+}
+
+.market-articles-region .region-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #7a8a9e;
+    letter-spacing: 0.06em;
+}
+
+.market-articles-region ul {
+    list-style: none;
+    padding-left: 8px;
+    margin-top: 4px;
+}
+
+.market-articles-region ul li {
+    font-size: 0.78rem;
+    color: #8a9ab0;
+    padding: 2px 0;
+}
+
+.market-articles-region ul li a {
+    color: #7ab3e0;
+    text-decoration: none;
+}
+
+.market-articles-region ul li a:hover {
+    text-decoration: underline;
+}

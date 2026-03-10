@@ -162,6 +162,31 @@ DEFAULT_TICKERS = [
     {"ticker": "207940.KS",  "category": "삼성", "name": "삼성바이오로직스"},
 ]
 
+# Global market indices
+MARKET_INDICES = [
+    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국"},
+    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국"},
+    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국"},
+    {"ticker": "^KS11",     "name": "코스피",    "region": "한국"},
+    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국"},
+    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국"},
+    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩"},
+    {"ticker": "^N225",     "name": "닛케이225", "region": "일본"},
+    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국"},
+    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스"},
+    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일"},
+]
+
+# Region → ticker mapping for market news search
+MARKET_NEWS_REGIONS = {
+    "미국":  {"ticker": "^DJI",      "query": "US stock market Dow Jones Nasdaq S&P 500"},
+    "한국":  {"ticker": "^KS11",     "query": "KOSPI KOSDAQ 코스피 코스닥 주식시장"},
+    "중국":  {"ticker": "000001.SS", "query": "China Shanghai stock market"},
+    "홍콩":  {"ticker": "^HSI",      "query": "Hong Kong Hang Seng stock market"},
+    "일본":  {"ticker": "^N225",     "query": "Japan Nikkei 225 stock market"},
+    "유럽":  {"ticker": "^FTSE",     "query": "European stock market FTSE DAX CAC"},
+}
+
 # Default Gemini prompt templates
 # Available variables: {name}, {ticker}, {change_pct}, {trade_date}
 # Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
@@ -548,6 +573,7 @@ def send_email_report():
     data = request.get_json()
     results = data.get("results", [])
     extra_to = data.get("extra_to", [])  # Additional one-time recipients from request
+    market_data = data.get("market_data", None)
 
     if not results:
         return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
@@ -564,7 +590,7 @@ def send_email_report():
     # Build HTML email
     today = datetime.now(KST).strftime("%Y-%m-%d")
     subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {today}"
-    html_body = build_email_html(results, today)
+    html_body = build_email_html(results, today, market_data=market_data)
 
     try:
         msg = MIMEMultipart("alternative")
@@ -588,8 +614,30 @@ def send_email_report():
         return jsonify({"error": f"이메일 전송 실패: {str(e)}"}), 500
 
 
-def build_email_html(results, date_str):
+def build_email_html(results, date_str, market_data=None):
     """Build HTML content for email report."""
+    # Build market indices section
+    market_section = ""
+    if market_data and market_data.get("indices"):
+        idx_rows = ""
+        for idx in market_data["indices"]:
+            chg = idx.get("change_pct", 0)
+            color = "#10b981" if chg > 0 else "#ef4444" if chg < 0 else "#aaa"
+            sign = "+" if chg > 0 else ""
+            err_note = ' <small style="color:#5a6a7a;">(오류)</small>' if idx.get("error") else ""
+            idx_rows += f'<tr><td style="padding:6px 12px;color:#ccc;">{idx["name"]}<small style="color:#5a6a7a;margin-left:4px;">({idx["region"]})</small></td><td style="padding:6px 12px;color:{color};font-weight:bold;">{sign}{chg:.2f}%{err_note}</td></tr>'
+
+        analysis_html = (market_data.get("analysis") or "").replace("\n", "<br>")
+        market_section = f"""
+        <h2 style="color:#60a5fa;margin-top:24px;margin-bottom:8px;">글로벌 시장 지수</h2>
+        <table style="width:100%;border-collapse:collapse;background:#1a2634;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+            {idx_rows}
+        </table>
+        <div style="background:#1e2f42;padding:12px;border-radius:8px;color:#ccc;line-height:1.6;margin-bottom:20px;">
+            <strong style="color:#93c5fd;">시장 분석</strong><br>{analysis_html}
+        </div>
+        """
+
     rows = ""
     for r in results:
         sign = "+" if r["change_pct"] > 0 else ""
@@ -632,6 +680,8 @@ def build_email_html(results, date_str):
         <div style="max-width:700px;margin:0 auto;">
             <h1 style="color:#3b82f6;margin-bottom:4px;">Stock Movement Analyzer</h1>
             <p style="color:#aaa;margin-top:0;">분석 날짜: {date_str}</p>
+            {market_section}
+            <h2 style="color:#60a5fa;margin-bottom:8px;">종목 변동 분석</h2>
             <table style="width:100%;border-collapse:collapse;background:#1a2634;border-radius:8px;overflow:hidden;">
                 {rows}
             </table>
@@ -640,6 +690,47 @@ def build_email_html(results, date_str):
     </body>
     </html>
     """
+
+
+@app.route("/api/market-indices", methods=["GET"])
+def get_market_indices():
+    """Fetch global market indices and analyze with news."""
+    date_str = request.args.get("date", "")
+    model = request.args.get("model", "")
+
+    target_date = None
+    if date_str:
+        try:
+            target_date = date_cls.fromisoformat(date_str)
+        except ValueError:
+            pass
+    if target_date is None:
+        target_date = get_kst_today()
+
+    if not model:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
+    indices_data = fetch_all_market_indices(target_date)
+    trade_date = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+
+    articles_by_region = {}
+    for region in MARKET_NEWS_REGIONS:
+        articles = search_market_news_for_region(region, trade_date, target_date)
+        if articles:
+            articles_by_region[region] = articles
+
+    analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+
+    return jsonify({
+        "indices": indices_data,
+        "analysis": analysis,
+        "date": trade_date,
+        "articles_by_region": {
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            for region, arts in articles_by_region.items()
+        },
+    })
 
 
 @app.route("/api/analyze/stream", methods=["GET"])
@@ -677,6 +768,28 @@ def analyze_stream():
 
     def generate():
         log_memory("STREAM START")
+
+        # Phase 0: Fetch global market indices + news + Gemini analysis
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
+        indices_data = fetch_all_market_indices(target_date)
+        trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
+        articles_by_region = {}
+        for region in MARKET_NEWS_REGIONS:
+            arts = search_market_news_for_region(region, trade_date_for_market, target_date)
+            if arts:
+                articles_by_region[region] = arts
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 Gemini 분석 중...'})}\n\n"
+        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+
+        articles_by_region_slim = {
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            for region, arts in articles_by_region.items()
+        }
+        yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
+        gc.collect()
 
         # Phase 1: Fetch all stock data in batches
         all_stocks_slim = {}
@@ -906,6 +1019,92 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
             "change_pct": 0,
             "name": ticker_symbol,
         }
+
+
+def fetch_all_market_indices(target_date=None):
+    """Fetch all global market indices data."""
+    results = []
+    for idx in MARKET_INDICES:
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
+        results.append({
+            "ticker": idx["ticker"],
+            "name": idx["name"],
+            "region": idx["region"],
+            "change_pct": data.get("change_pct", 0),
+            "date": data.get("date", ""),
+            "error": data.get("error", ""),
+        })
+    return results
+
+
+def search_market_news_for_region(region, trade_date, target_date=None):
+    """Search news articles for a global market region."""
+    cfg = MARKET_NEWS_REGIONS.get(region)
+    if not cfg:
+        return []
+    ticker = cfg["ticker"]
+    query = cfg["query"]
+    try:
+        return search_all_news_articles(
+            ticker, query, trade_date,
+            target_date=target_date,
+            custom_query=query,
+        )
+    except Exception:
+        return []
+
+
+def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=None):
+    """Analyze global market index movements using Gemini and collected news."""
+    if not GEMINI_API_KEY:
+        return "Gemini API key not configured."
+    client = get_gemini_client()
+    if not client:
+        return "Gemini client initialization failed."
+    if model is None:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
+    trade_date = next((idx["date"] for idx in indices_data if idx.get("date")), "")
+    indices_text = "\n".join(
+        f"  {idx['name']} ({idx['region']}): {'+' if idx['change_pct'] > 0 else ''}{idx['change_pct']:.2f}%"
+        + (f"  [오류]" if idx.get("error") else "")
+        for idx in indices_data
+    )
+
+    articles_text_parts = []
+    for region, articles in articles_by_region.items():
+        if articles:
+            articles_text_parts.append(f"\n[{region} 뉴스]")
+            for i, a in enumerate(articles[:5]):
+                line = f"  [{i+1}] [{a.get('source', '')}] {a['title']}"
+                if a.get("snippet"):
+                    line += f"\n      {a['snippet']}"
+                articles_text_parts.append(line)
+    articles_text = "\n".join(articles_text_parts) if articles_text_parts else "수집된 뉴스 없음"
+
+    prompt = f"""You are a global financial market analyst.
+
+날짜: {trade_date}
+
+주요 글로벌 지수 등락:
+{indices_text}
+
+수집된 뉴스 기사:
+{articles_text}
+
+Instructions:
+1. 출력은 한글로 해라.
+2. 미국·한국·중국/홍콩·일본·유럽 시장별로 등락 원인을 뉴스 근거로 1-2문장씩 간결하게 설명해라.
+3. 뉴스 근거가 없는 지역은 "정보 없음"으로 표시해라.
+4. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+5. 마지막에 전체 시장 분위기를 1문장으로 요약해라."""
+
+    try:
+        response = client.models.generate_content(model=model, contents=prompt)
+        return response.text
+    except Exception as e:
+        return f"분석 실패: {str(e)}"
 
 
 def build_search_query(custom_query, company_name, ticker, fallback):

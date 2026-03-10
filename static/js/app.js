@@ -60,8 +60,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const categoryList = document.getElementById("categoryList");
     const categoryStats = document.getElementById("categoryStats");
 
+    // Market indices elements
+    const marketIndicesSection = document.getElementById("marketIndicesSection");
+    const marketIndicesGrid = document.getElementById("marketIndicesGrid");
+    const marketIndicesAnalysis = document.getElementById("marketIndicesAnalysis");
+    const marketIndicesArticles = document.getElementById("marketIndicesArticles");
+
     // Store analysis results for email sending
     let currentResults = [];
+    // Store market indices data for email
+    let currentMarketData = null;
     // Store default prompts for reset
     let defaultPrompts = { with_articles: "", without_articles: "" };
     // Active EventSource (for stop functionality)
@@ -446,7 +454,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/send-email", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ results: currentResults }),
+                body: JSON.stringify({ results: currentResults, market_data: currentMarketData }),
             });
             const data = await resp.json();
             if (resp.ok) {
@@ -662,7 +670,9 @@ document.addEventListener("DOMContentLoaded", () => {
         allStocksOverview.innerHTML = "";
         analysisResults.innerHTML = "";
         currentResults = [];
+        currentMarketData = null;
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
+        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; marketIndicesArticles.style.display = "none"; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -682,8 +692,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     case "progress":
                         loadingText.textContent = data.message;
                         // Update progress bar
-                        if (data.message.includes("주가 수집")) {
-                            progressFill.style.width = "20%";
+                        if (data.message.includes("글로벌 지수")) {
+                            progressFill.style.width = "10%";
+                        } else if (data.message.includes("주가 수집")) {
+                            progressFill.style.width = "25%";
                         } else if (data.message.includes("분석 시작")) {
                             progressFill.style.width = "40%";
                         } else if (data.message.includes("뉴스 기사 검색")) {
@@ -699,6 +711,12 @@ document.addEventListener("DOMContentLoaded", () => {
                                 progressFill.style.width = pct + "%";
                             }
                         }
+                        break;
+
+                    case "market_indices":
+                        currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date };
+                        resultsSection.style.display = "block";
+                        renderMarketIndices(data);
                         break;
 
                     case "stocks":
@@ -754,6 +772,56 @@ document.addEventListener("DOMContentLoaded", () => {
             if (stopBtn) stopBtn.style.display = "none";
             showError("분석 중 오류가 발생했습니다. 다시 시도해주세요.");
         };
+    }
+
+    function renderMarketIndices(data) {
+        if (!marketIndicesSection || !data || !data.indices) return;
+
+        // Render index tiles
+        const indices = data.indices || [];
+        marketIndicesGrid.innerHTML = indices.map(idx => {
+            const chg = idx.change_pct || 0;
+            const cls = idx.error ? "error" : chg > 0 ? "positive" : chg < 0 ? "negative" : "neutral";
+            const sign = chg > 0 ? "+" : "";
+            const changeText = idx.error ? "오류" : `${sign}${chg.toFixed(2)}%`;
+            return `<div class="market-index-item ${cls}">
+                <span class="idx-region">${escapeHtml(idx.region)}</span>
+                <span class="idx-name">${escapeHtml(idx.name)}</span>
+                <span class="idx-change">${changeText}</span>
+            </div>`;
+        }).join("");
+
+        // Render Gemini analysis
+        if (data.analysis) {
+            marketIndicesAnalysis.textContent = data.analysis;
+            marketIndicesAnalysis.style.display = "block";
+        }
+
+        // Render articles by region
+        const articlesByRegion = data.articles_by_region || {};
+        const regionEntries = Object.entries(articlesByRegion).filter(([, arts]) => arts && arts.length > 0);
+        if (regionEntries.length > 0) {
+            let html = '<div class="market-articles-section"><h4>📰 지수 관련 뉴스</h4>';
+            for (const [region, arts] of regionEntries) {
+                const items = arts.map(a => {
+                    const datePart = a.date ? `<span class="article-date">${escapeHtml(a.date)}</span> ` : "";
+                    const srcPart = a.source ? ` <small>(${escapeHtml(a.source)})</small>` : "";
+                    const title = a.link
+                        ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
+                        : escapeHtml(a.title);
+                    return `<li>${datePart}${title}${srcPart}</li>`;
+                }).join("");
+                html += `<div class="market-articles-region">
+                    <span class="region-label">${escapeHtml(region)}</span>
+                    <ul>${items}</ul>
+                </div>`;
+            }
+            html += "</div>";
+            marketIndicesArticles.innerHTML = html;
+            marketIndicesArticles.style.display = "block";
+        }
+
+        marketIndicesSection.style.display = "block";
     }
 
     function renderCategoryStats(stats) {
