@@ -43,10 +43,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const csvUploadBtn = document.getElementById("csvUploadBtn");
     const resetDefaultsBtn = document.getElementById("resetDefaultsBtn");
 
+    // Stop button
+    const stopBtn = document.getElementById("stopBtn");
+
+    // Custom query elements
+    const customQueryInput = document.getElementById("customQueryInput");
+    const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
+
     // Store analysis results for email sending
     let currentResults = [];
     // Store default prompts for reset
     let defaultPrompts = { with_articles: "", without_articles: "" };
+    // Active EventSource (for stop functionality)
+    let currentEventSource = null;
 
     // ─── Init ─────────────────────────────────────────────────────────────
 
@@ -134,6 +143,16 @@ document.addEventListener("DOMContentLoaded", () => {
         resetDefaultsBtn.addEventListener("click", resetToDefaultTickers);
     }
 
+    // Stop analysis
+    if (stopBtn) {
+        stopBtn.addEventListener("click", stopAnalysis);
+    }
+
+    // Save custom query
+    if (saveCustomQueryBtn) {
+        saveCustomQueryBtn.addEventListener("click", saveCustomQuery);
+    }
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -193,6 +212,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 promptWithoutArticles.value = data.prompt_without_articles || data.default_prompt_without_articles || "";
             }
 
+            // Load custom query
+            if (customQueryInput) {
+                customQueryInput.value = data.custom_query || "";
+            }
+
         } catch (err) {
             console.error("Failed to load settings:", err);
         }
@@ -234,6 +258,36 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             showError("저장 오류");
         }
+    }
+
+    async function saveCustomQuery() {
+        const query = customQueryInput ? customQueryInput.value.trim() : "";
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ custom_query: query }),
+            });
+            if (resp.ok) {
+                showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
+            } else {
+                showError("저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
+        }
+    }
+
+    function stopAnalysis() {
+        if (currentEventSource) {
+            currentEventSource.close();
+            currentEventSource = null;
+        }
+        loadingSection.style.display = "none";
+        progressFill.style.width = "0%";
+        analyzeBtn.disabled = false;
+        if (stopBtn) stopBtn.style.display = "none";
+        showSuccess("분석이 중지되었습니다. 지금까지의 결과는 유지됩니다.");
     }
 
     // ─── Email Recipient Functions ────────────────────────────────────────
@@ -520,6 +574,7 @@ document.addEventListener("DOMContentLoaded", () => {
         resultsSection.style.display = "none";
         loadingSection.style.display = "block";
         analyzeBtn.disabled = true;
+        if (stopBtn) stopBtn.style.display = "inline-block";
 
         // Reset results
         allStocksOverview.innerHTML = "";
@@ -528,10 +583,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
+        const customQuery = customQueryInput ? customQueryInput.value.trim() : "";
 
         // Use SSE for streaming
-        const url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;
+        let url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;
+        if (customQuery) url += `&custom_query=${encodeURIComponent(customQuery)}`;
         const eventSource = new EventSource(url);
+        currentEventSource = eventSource;
 
         eventSource.onmessage = function(event) {
             try {
@@ -572,6 +630,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     case "done":
                         eventSource.close();
+                        currentEventSource = null;
                         progressFill.style.width = "100%";
                         loadingText.textContent = "완료!";
 
@@ -579,6 +638,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             loadingSection.style.display = "none";
                             progressFill.style.width = "0%";
                             analyzeBtn.disabled = false;
+                            if (stopBtn) stopBtn.style.display = "none";
 
                             // Show send email button if results exist
                             if (sendEmailBtn && currentResults.length > 0) {
@@ -604,8 +664,10 @@ document.addEventListener("DOMContentLoaded", () => {
         eventSource.onerror = function(err) {
             console.error("SSE error:", err);
             eventSource.close();
+            currentEventSource = null;
             loadingSection.style.display = "none";
             analyzeBtn.disabled = false;
+            if (stopBtn) stopBtn.style.display = "none";
             showError("분석 중 오류가 발생했습니다. 다시 시도해주세요.");
         };
     }

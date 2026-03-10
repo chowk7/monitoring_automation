@@ -135,6 +135,21 @@ header h1 {
     font-size: 0.85rem;
 }
 
+.btn-stop {
+    margin-top: 14px;
+    padding: 10px 24px;
+    background: transparent;
+    border: 1px solid #ef4444;
+    color: #f87171;
+    font-size: 0.95rem;
+    border-radius: 8px;
+}
+
+.btn-stop:hover {
+    background: rgba(239, 68, 68, 0.12);
+    transform: translateY(-1px);
+}
+
 .btn-clear {
     padding: 6px 14px;
     background: transparent;

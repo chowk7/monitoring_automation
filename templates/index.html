@@ -90,6 +90,16 @@
                     <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
                 </div>
 
+                <!-- Custom Search Query -->
+                <div class="settings-row">
+                    <label for="customQueryInput">검색어 템플릿</label>
+                    <input type="text" id="customQueryInput" class="model-select"
+                           placeholder="예: {종목명} stock price (비워두면 기본 검색어 사용)"
+                           autocomplete="off" spellcheck="false">
+                    <button id="saveCustomQueryBtn" class="btn btn-save-model">저장</button>
+                    <small class="settings-hint" style="display:block;margin-top:4px;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code> · NewsAPI, Google CSE 검색어에 적용</small>
+                </div>
+
                 <!-- Gemini Prompt Editor -->
                 <div class="prompt-settings-row">
                     <div class="prompt-section-header">
@@ -153,6 +163,7 @@
             <div class="progress-bar">
                 <div id="progressFill" class="progress-fill"></div>
             </div>
+            <button id="stopBtn" class="btn btn-stop">⏹ 분석 중지</button>
         </section>
 
         <!-- Results Section -->

@@ -144,6 +144,7 @@ def load_settings():
         "email_recipients": [],
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
+        "custom_query": "",
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -352,6 +353,8 @@ def update_settings():
         settings["prompt_with_articles"] = data["prompt_with_articles"]
     if "prompt_without_articles" in data:
         settings["prompt_without_articles"] = data["prompt_without_articles"]
+    if "custom_query" in data:
+        settings["custom_query"] = data["custom_query"]
     save_settings(settings)
     return jsonify(settings)
 
@@ -530,6 +533,9 @@ def analyze_stream():
         "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
     }
 
+    # Custom search query (from query param, fallback to saved setting)
+    custom_query = request.args.get("custom_query", "").strip() or settings.get("custom_query", "")
+
     def generate():
         log_memory("STREAM START")
 
@@ -594,6 +600,7 @@ def analyze_stream():
                         info.get("name", ticker),
                         info.get("date", ""),
                         target_date=target_date,
+                        custom_query=custom_query,
                     )
 
                     # Step 2: Analyze with Gemini
@@ -745,6 +752,13 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         }
 
 
+def build_search_query(custom_query, company_name, ticker, fallback):
+    """Return query string: apply custom_query template or use fallback."""
+    if not custom_query:
+        return fallback
+    return custom_query.replace("{종목명}", company_name).replace("{name}", company_name).replace("{ticker}", ticker)
+
+
 def search_news_articles_yahoo_finance(ticker, company_name):
     """Search news from Yahoo Finance (no API key required)."""
     try:
@@ -787,7 +801,7 @@ def search_news_articles_yahoo_finance(ticker, company_name):
         return []
 
 
-def search_news_articles_newsapi(ticker, company_name, target_date=None):
+def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_query=None):
     """Search news from NewsAPI.org (requires NEWS_API_KEY).
 
     If target_date is provided, searches articles from target_date to target_date+1.
@@ -795,7 +809,7 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None):
     if not NEWS_API_KEY:
         return []
     try:
-        query = f'"{company_name}" OR "{ticker}" stock'
+        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock')
         url = "https://newsapi.org/v2/everything"
         params = {
             "q": query,
@@ -834,7 +848,7 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None):
         return []
 
 
-def search_news_articles_google(ticker, company_name, trade_date, target_date=None):
+def search_news_articles_google(ticker, company_name, trade_date, target_date=None, custom_query=None):
     """Search news from Google Custom Search API (requires GOOGLE_API_KEY + GOOGLE_CSE_ID).
 
     If target_date is provided, restricts results to that date range (date to date+1).
@@ -843,7 +857,7 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
         return []
 
     try:
-        query = f'"{company_name}" OR "{ticker}" stock news'
+        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock news')
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
             "key": GOOGLE_API_KEY,
@@ -867,18 +881,46 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
         for item in data.get("items", []):
             title = item.get("title", "")
             if title:
-                # Try to extract publish date from pagemap metatags
+                # Try to extract publish date from pagemap (multiple sources)
                 pub_date = ""
                 pagemap = item.get("pagemap", {})
+
+                # 1. Try metatags first
                 metatags = pagemap.get("metatags", [])
                 if metatags:
                     raw_date = (
                         metatags[0].get("article:published_time", "") or
+                        metatags[0].get("article:modified_time", "") or
                         metatags[0].get("og:updated_time", "") or
-                        metatags[0].get("date", "")
+                        metatags[0].get("og:article:published_time", "") or
+                        metatags[0].get("date", "") or
+                        metatags[0].get("datePublished", "") or
+                        metatags[0].get("pubdate", "")
                     )
                     if raw_date:
                         pub_date = raw_date[:10]
+
+                # 2. Try newsarticle / article pagemap
+                if not pub_date:
+                    for key in ("newsarticle", "article"):
+                        entries = pagemap.get(key, [])
+                        if entries:
+                            raw_date = entries[0].get("datepublished", "") or entries[0].get("datemodified", "")
+                            if raw_date:
+                                pub_date = raw_date[:10]
+                                break
+
+                # 3. Try to extract date from snippet (Google often prepends "MMM DD, YYYY — ")
+                if not pub_date:
+                    snippet = item.get("snippet", "")
+                    import re as _re
+                    m = _re.match(r"([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})", snippet)
+                    if m:
+                        try:
+                            from datetime import datetime as _dt
+                            pub_date = _dt.strptime(m.group(1), "%b %d, %Y").strftime("%Y-%m-%d")
+                        except ValueError:
+                            pass
                 articles.append({
                     "title": title,
                     "snippet": item.get("snippet", ""),
@@ -894,7 +936,7 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
         return []
 
 
-def search_all_news_articles(ticker, company_name, trade_date, target_date=None):
+def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None):
     """Search news from all available sources and merge results.
 
     Priority: Yahoo Finance (always) → NewsAPI (if configured) → Google CSE (if configured)
@@ -902,16 +944,16 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None)
     """
     all_articles = []
 
-    # 1. Yahoo Finance — always available
+    # 1. Yahoo Finance — always available (uses ticker directly, not text query)
     all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
 
     # 2. NewsAPI — optional
     if NEWS_API_KEY:
-        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date))
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
 
     # 3. Google CSE — optional
     if GOOGLE_API_KEY and GOOGLE_CSE_ID:
-        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date))
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
 
     # Deduplicate by title
     seen_titles = set()
