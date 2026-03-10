@@ -663,6 +663,159 @@ header h1 {
     cursor: not-allowed;
 }
 
+/* ─── Date Input ─────────────────────────────────────────────────────────── */
+.date-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.date-row label {
+    font-size: 0.9rem;
+    color: #a3bfdb;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 130px;
+}
+
+input[type="date"] {
+    padding: 10px 14px;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    background: #0f1923;
+    color: #e0e6ed;
+    font-size: 0.95rem;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+input[type="date"]:focus {
+    border-color: #3b82f6;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.7);
+    cursor: pointer;
+}
+
+.date-hint {
+    font-size: 0.78rem;
+    color: #5a6a7a;
+}
+
+/* ─── CSV Upload Button ───────────────────────────────────────────────────── */
+.csv-upload-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.btn-upload {
+    padding: 10px 18px;
+    background: transparent;
+    border: 1px dashed #3b82f6;
+    color: #3b82f6;
+    font-size: 0.88rem;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+}
+
+.btn-upload:hover {
+    background: rgba(59, 130, 246, 0.1);
+    border-style: solid;
+}
+
+/* ─── Prompt Editor ───────────────────────────────────────────────────────── */
+.prompt-settings-row {
+    padding: 12px 0;
+    border-bottom: 1px solid #2a3a4a;
+}
+
+.prompt-settings-row:last-child {
+    border-bottom: none;
+}
+
+.prompt-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.prompt-section-header label {
+    font-size: 0.9rem;
+    color: #a3bfdb;
+    font-weight: 600;
+    min-width: 130px;
+}
+
+.prompt-body {
+    margin-top: 12px;
+}
+
+.prompt-var-hint {
+    font-size: 0.75rem;
+    color: #5a6a7a;
+    margin-bottom: 6px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.prompt-textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: 12px 14px;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    background: #0a1218;
+    color: #c8d6e5;
+    font-size: 0.8rem;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s;
+    margin-bottom: 12px;
+}
+
+.prompt-textarea:focus {
+    border-color: #3b82f6;
+}
+
+.prompt-label {
+    font-size: 0.82rem;
+    color: #7a8a9e;
+    font-weight: 600;
+    margin: 10px 0 4px 0;
+}
+
+.prompt-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.btn-reset {
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid #2a3a4a;
+    color: #7a8a9e;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-reset:hover {
+    background: #253547;
+    color: #a3bfdb;
+}
+
 /* ─── Responsive ──────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
     .container {

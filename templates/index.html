@@ -10,7 +10,7 @@
     <div class="container">
         <header>
             <h1>Stock Movement Analyzer</h1>
-            <p class="subtitle">전일 주가 변동 원인 분석기</p>
+            <p class="subtitle">주가 변동 원인 분석기</p>
         </header>
 
         <!-- Ticker Input Section -->
@@ -22,6 +22,13 @@
                 <button id="addBtn" class="btn btn-add">추가</button>
             </div>
             <p class="hint">미국 주식: AAPL, TSLA / 한국 주식: 005930.KS (삼성전자), 000660.KS (SK하이닉스)</p>
+
+            <!-- CSV Upload -->
+            <div class="csv-upload-row">
+                <input type="file" id="csvUploadInput" accept=".csv" style="display:none;">
+                <button id="csvUploadBtn" class="btn btn-upload">📂 CSV 파일로 일괄 추가</button>
+                <span class="hint" style="margin:0;">CSV 첫 번째 열에 티커 심볼 입력 (헤더 행 자동 제외)</span>
+            </div>
         </section>
 
         <!-- Saved Tickers Section -->
@@ -34,6 +41,14 @@
             <div id="tickerList" class="ticker-list">
                 <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
             </div>
+
+            <!-- Analysis Date -->
+            <div class="date-row">
+                <label for="analysisDate">분석 날짜 (KST)</label>
+                <input type="date" id="analysisDate">
+                <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
+            </div>
+
             <button id="analyzeBtn" class="btn btn-analyze" disabled>
                 <span class="btn-icon">&#9654;</span> 분석 실행
             </button>
@@ -68,6 +83,30 @@
                         <span id="googleCseStatus" class="status-badge status-unknown">Google CSE 확인 중...</span>
                     </div>
                     <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
+                </div>
+
+                <!-- Gemini Prompt Editor -->
+                <div class="prompt-settings-row">
+                    <div class="prompt-section-header">
+                        <label>Gemini 프롬프트</label>
+                        <button class="btn btn-toggle" id="promptToggle" style="margin-left:0;">펼치기 ▼</button>
+                    </div>
+                    <div id="promptBody" style="display:none;">
+                        <p class="prompt-var-hint" style="margin-top:10px;">
+                            사용 가능한 변수: <code>{name}</code> <code>{ticker}</code> <code>{change_pct}</code> <code>{trade_date}</code>
+                        </p>
+
+                        <p class="prompt-label">📰 뉴스 기사 있을 때 (추가 변수: <code>{articles_text}</code> <code>{sources_label}</code> <code>{articles_count}</code>)</p>
+                        <textarea id="promptWithArticles" class="prompt-textarea" spellcheck="false"></textarea>
+
+                        <p class="prompt-label">🔍 뉴스 기사 없을 때</p>
+                        <textarea id="promptWithoutArticles" class="prompt-textarea" spellcheck="false"></textarea>
+
+                        <div class="prompt-actions">
+                            <button id="savePromptsBtn" class="btn btn-save-model">저장</button>
+                            <button id="resetPromptsBtn" class="btn btn-reset">기본값 복원</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>

@@ -19,7 +19,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveModelBtn = document.getElementById("saveModelBtn");
     const settingsToggle = document.getElementById("settingsToggle");
     const settingsBody = document.getElementById("settingsBody");
-    // newsSearchStatus is now split into multiple elements (newsApiStatus, googleCseStatus)
+
+    // Prompt editor elements
+    const promptToggle = document.getElementById("promptToggle");
+    const promptBody = document.getElementById("promptBody");
+    const promptWithArticles = document.getElementById("promptWithArticles");
+    const promptWithoutArticles = document.getElementById("promptWithoutArticles");
+    const savePromptsBtn = document.getElementById("savePromptsBtn");
+    const resetPromptsBtn = document.getElementById("resetPromptsBtn");
 
     // Email elements
     const emailInput = document.getElementById("emailInput");
@@ -28,10 +35,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const emailBody = document.getElementById("emailBody");
     const sendEmailBtn = document.getElementById("sendEmailBtn");
 
+    // Date element
+    const analysisDate = document.getElementById("analysisDate");
+
+    // CSV upload elements
+    const csvUploadInput = document.getElementById("csvUploadInput");
+    const csvUploadBtn = document.getElementById("csvUploadBtn");
+
     // Store analysis results for email sending
     let currentResults = [];
+    // Store default prompts for reset
+    let defaultPrompts = { with_articles: "", without_articles: "" };
 
-    // Load on startup
+    // ─── Init ─────────────────────────────────────────────────────────────
+
+    // Set default analysis date to today in KST
+    if (analysisDate) {
+        analysisDate.value = getKstDateString();
+    }
+
     loadTickers();
     loadSettings();
     loadEmailRecipients();
@@ -59,6 +81,29 @@ document.addEventListener("DOMContentLoaded", () => {
     // Save model
     saveModelBtn.addEventListener("click", saveModel);
 
+    // Prompt toggle
+    if (promptToggle) {
+        promptToggle.addEventListener("click", () => {
+            const collapsed = promptBody.style.display === "none";
+            promptBody.style.display = collapsed ? "block" : "none";
+            promptToggle.textContent = collapsed ? "접기 ▲" : "펼치기 ▼";
+        });
+    }
+
+    // Save prompts
+    if (savePromptsBtn) {
+        savePromptsBtn.addEventListener("click", savePrompts);
+    }
+
+    // Reset prompts to defaults
+    if (resetPromptsBtn) {
+        resetPromptsBtn.addEventListener("click", () => {
+            if (promptWithArticles) promptWithArticles.value = defaultPrompts.with_articles;
+            if (promptWithoutArticles) promptWithoutArticles.value = defaultPrompts.without_articles;
+            showSuccess("프롬프트를 기본값으로 복원했습니다. 저장 버튼을 눌러 적용하세요.");
+        });
+    }
+
     // Email toggle
     emailToggle.addEventListener("click", () => {
         const collapsed = emailBody.style.display === "none";
@@ -75,6 +120,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // Send email
     if (sendEmailBtn) {
         sendEmailBtn.addEventListener("click", sendEmailReport);
+    }
+
+    // CSV upload
+    if (csvUploadBtn && csvUploadInput) {
+        csvUploadBtn.addEventListener("click", () => csvUploadInput.click());
+        csvUploadInput.addEventListener("change", uploadCsvFile);
+    }
+
+    // ─── Date Utility ─────────────────────────────────────────────────────
+
+    function getKstDateString() {
+        // KST = UTC + 9h
+        const now = new Date();
+        const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        return kst.toISOString().slice(0, 10);
     }
 
     // ─── Settings Functions ───────────────────────────────────────────────
@@ -112,6 +172,21 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 }
             }
+
+            // Load prompt templates
+            if (data.default_prompt_with_articles) {
+                defaultPrompts.with_articles = data.default_prompt_with_articles;
+            }
+            if (data.default_prompt_without_articles) {
+                defaultPrompts.without_articles = data.default_prompt_without_articles;
+            }
+            if (promptWithArticles) {
+                promptWithArticles.value = data.prompt_with_articles || data.default_prompt_with_articles || "";
+            }
+            if (promptWithoutArticles) {
+                promptWithoutArticles.value = data.prompt_without_articles || data.default_prompt_without_articles || "";
+            }
+
         } catch (err) {
             console.error("Failed to load settings:", err);
         }
@@ -130,6 +205,27 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             showError("모델 저장 실패");
+        }
+    }
+
+    async function savePrompts() {
+        const body = {};
+        if (promptWithArticles) body.prompt_with_articles = promptWithArticles.value;
+        if (promptWithoutArticles) body.prompt_without_articles = promptWithoutArticles.value;
+
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (resp.ok) {
+                showSuccess("프롬프트 저장됨");
+            } else {
+                showError("프롬프트 저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
         }
     }
 
@@ -346,6 +442,32 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function uploadCsvFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const resp = await fetch("/api/tickers/upload", {
+                method: "POST",
+                body: formData,
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                renderTickers(data.tickers);
+                showSuccess(`CSV에서 ${data.added_count}개 종목 추가됨 (총 ${data.tickers.length}개)`);
+            } else {
+                showError(data.error || "CSV 업로드 실패");
+            }
+        } catch (err) {
+            showError("CSV 업로드 오류");
+        } finally {
+            csvUploadInput.value = "";
+        }
+    }
+
     function renderTickers(tickers) {
         tickerCount.textContent = tickers.length;
         analyzeBtn.disabled = tickers.length === 0;
@@ -382,9 +504,11 @@ document.addEventListener("DOMContentLoaded", () => {
         currentResults = [];
 
         const selectedModel = modelSelect ? modelSelect.value : "gemini-2.5-pro";
+        const dateStr = analysisDate ? analysisDate.value : getKstDateString();
 
         // Use SSE for streaming
-        const eventSource = new EventSource(`/api/analyze/stream?model=${encodeURIComponent(selectedModel)}`);
+        const url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;
+        const eventSource = new EventSource(url);
 
         eventSource.onmessage = function(event) {
             try {
@@ -414,9 +538,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         break;
 
                     case "stocks":
-                        allStocksData = data.all_stocks;
                         resultsSection.style.display = "block";
-                        renderAllStocksOverview(allStocksData);
+                        renderAllStocksOverview(data.all_stocks);
                         break;
 
                     case "results":
@@ -443,7 +566,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 analysisResults.innerHTML = `
                                     <div class="no-filter-message">
                                         <p>${escapeHtml(data.message)}</p>
-                                        <p style="margin-top:8px"><strong>Tip:</strong> 변동성이 큰 종목을 추가해보세요.</p>
+                                        <p style="margin-top:8px"><strong>Tip:</strong> 변동성이 큰 종목을 추가하거나 날짜를 변경해보세요.</p>
                                     </div>
                                 `;
                             }
@@ -510,6 +633,30 @@ document.addEventListener("DOMContentLoaded", () => {
                 newsBadge = `<span class="news-badge news-badge-none">Gemini 자체 분석</span>`;
             }
 
+            // Article links
+            let articlesHtml = "";
+            if (result.articles && result.articles.length > 0) {
+                const articleItems = result.articles.map(a => {
+                    const datePart = a.date
+                        ? `<span class="article-date">${escapeHtml(a.date)}</span>`
+                        : "";
+                    const sourcePart = a.source
+                        ? ` <small style="color:#5a6a7a;">(${escapeHtml(a.source)})</small>`
+                        : "";
+                    const titleHtml = a.link
+                        ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
+                        : escapeHtml(a.title);
+                    return `<li>${datePart}${titleHtml}${sourcePart}</li>`;
+                }).join("");
+
+                articlesHtml = `
+                    <div class="result-articles">
+                        <h4>📰 근거 기사</h4>
+                        <ul>${articleItems}</ul>
+                    </div>
+                `;
+            }
+
             html += `
                 <div class="result-card ${cls}">
                     <div class="result-header">
@@ -519,6 +666,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span class="result-meta">${escapeHtml(modelLabel)}</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
+                    ${articlesHtml}
                 </div>
             `;
         }
