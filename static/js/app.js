@@ -20,10 +20,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const asiaIndices       = document.getElementById("asiaIndices");
     const euIndices         = document.getElementById("euIndices");
 
-    const emailSection  = document.getElementById("emailSection");
-    const emailInput    = document.getElementById("emailInput");
-    const emailSendBtn  = document.getElementById("emailSendBtn");
-    const emailStatus   = document.getElementById("emailStatus");
+    const emailSection   = document.getElementById("emailSection");
+    const emailInput     = document.getElementById("emailInput");
+    const emailAddBtn    = document.getElementById("emailAddBtn");
+    const emailSendBtn   = document.getElementById("emailSendBtn");
+    const emailStatus    = document.getElementById("emailStatus");
+    const recipientTags  = document.getElementById("recipientTags");
+
+    // Default recipients (lub2sky@gmail.com 제외)
+    const DEFAULT_RECIPIENTS = [];
+    let recipients = [...DEFAULT_RECIPIENTS];
 
     const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
 
@@ -132,14 +138,49 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    if (emailSendBtn) {
-        emailSendBtn.addEventListener("click", sendEmail);
+    function renderRecipientTags() {
+        if (!recipientTags) return;
+        recipientTags.innerHTML = "";
+        recipients.forEach((email, idx) => {
+            const tag = document.createElement("span");
+            tag.className = "recipient-tag";
+            tag.innerHTML = `${email}<button class="recipient-tag-remove" title="제외" data-idx="${idx}">&times;</button>`;
+            tag.querySelector("button").addEventListener("click", () => {
+                recipients.splice(idx, 1);
+                renderRecipientTags();
+            });
+            recipientTags.appendChild(tag);
+        });
     }
 
+    function addRecipient() {
+        const val = emailInput.value.trim();
+        if (!val) return;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+            setEmailStatus("올바른 이메일 형식이 아닙니다.", "error");
+            return;
+        }
+        if (recipients.includes(val)) {
+            setEmailStatus("이미 추가된 주소입니다.", "error");
+            return;
+        }
+        recipients.push(val);
+        emailInput.value = "";
+        emailStatus.textContent = "";
+        renderRecipientTags();
+    }
+
+    if (emailAddBtn) emailAddBtn.addEventListener("click", addRecipient);
+    if (emailInput) {
+        emailInput.addEventListener("keydown", e => {
+            if (e.key === "Enter") { e.preventDefault(); addRecipient(); }
+        });
+    }
+    if (emailSendBtn) emailSendBtn.addEventListener("click", sendEmail);
+
     async function sendEmail() {
-        const to = emailInput.value.trim();
-        if (!to) {
-            setEmailStatus("이메일 주소를 입력하세요.", "error");
+        if (recipients.length === 0) {
+            setEmailStatus("수신자를 추가해주세요.", "error");
             return;
         }
         if (!_cachedIndicesData) {
@@ -155,7 +196,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    to_email:     to,
+                    to_emails:    recipients,
                     indices_data: _cachedIndicesData,
                     news_summary: _cachedNewsSummary,
                     report_date:  _cachedReportDate,

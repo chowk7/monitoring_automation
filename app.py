@@ -593,13 +593,13 @@ def send_email():
         return jsonify({"error": "SMTP 설정이 없습니다. 환경변수(SMTP_USER, SMTP_PASSWORD)를 확인하세요."}), 400
 
     data = request.get_json()
-    to_email     = data.get("to_email", "").strip()
+    to_emails    = data.get("to_emails", [])
     indices_data = data.get("indices_data", {})
     news_summary = data.get("news_summary", "")
     report_date  = data.get("report_date", datetime.now().strftime("%Y-%m-%d"))
 
-    if not to_email:
-        return jsonify({"error": "수신 이메일을 입력해주세요."}), 400
+    if not to_emails:
+        return jsonify({"error": "수신자를 추가해주세요."}), 400
 
     try:
         html_body = build_email_html(indices_data, news_summary, report_date)
@@ -607,17 +607,19 @@ def send_email():
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"[주식 리포트] 글로벌 주요 지수 현황 ({report_date})"
         msg["From"]    = SMTP_USER
-        msg["To"]      = to_email
+        msg["To"]      = ", ".join(to_emails)
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, to_email, msg.as_string())
+            server.sendmail(SMTP_USER, to_emails, msg.as_string())
 
-        logger.info(f"Email sent to {to_email}")
-        return jsonify({"message": f"{to_email}로 발송 완료!"})
+        count = len(to_emails)
+        label = to_emails[0] if count == 1 else f"{to_emails[0]} 외 {count - 1}명"
+        logger.info(f"Email sent to {to_emails}")
+        return jsonify({"message": f"{label}에게 발송 완료!"})
 
     except smtplib.SMTPAuthenticationError:
         return jsonify({"error": "SMTP 인증 실패. 계정/비밀번호를 확인하세요."}), 500

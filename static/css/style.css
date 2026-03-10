@@ -638,17 +638,70 @@ header h1 {
 }
 
 /* ─── Email Send UI ──────────────────────────────────────────────────────── */
-.email-row {
+.email-header {
     display: flex;
     align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
 }
 
 .email-icon {
     font-size: 1.1rem;
     color: #6366f1;
     flex-shrink: 0;
+}
+
+.email-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #7a8a9e;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.recipient-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.recipient-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 5px 12px;
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    border-radius: 20px;
+    font-size: 0.83rem;
+    color: #a5b4fc;
+}
+
+.recipient-tag-remove {
+    background: none;
+    border: none;
+    color: #6366f1;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+.recipient-tag-remove:hover {
+    opacity: 1;
+    color: #f87171;
+}
+
+.email-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .email-input {
@@ -670,6 +723,21 @@ header h1 {
 
 .email-input::placeholder {
     color: #4a5a6a;
+}
+
+.btn-email-add {
+    background: transparent;
+    color: #6366f1;
+    border: 1px solid #6366f1;
+    padding: 9px 16px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.btn-email-add:hover {
+    background: rgba(99, 102, 241, 0.12);
 }
 
 .btn-email {
