@@ -43,7 +43,11 @@ SMTP_PORT = 587
 SMTP_USER = "lub2sky@gmail.com"
 SMTP_PASSWORD = "rasmdixgbznopxel"
 EMAIL_FROM = "lub2sky@gmail.com"
-EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients
+EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients (env)
+DEFAULT_EMAIL_RECIPIENTS = list(dict.fromkeys(
+    [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()]
+    + ["lub2sky@gmail.com", "yunseong.cho@samsung.com"]
+))  # hardcoded defaults merged with env
 
 # Available Gemini models (for autocomplete suggestions; manual input also allowed)
 AVAILABLE_GEMINI_MODELS = [
@@ -526,10 +530,9 @@ def update_settings():
 @app.route("/api/email/recipients", methods=["GET"])
 def get_email_recipients():
     settings = load_settings()
-    default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
     extra_list = settings.get("email_recipients", [])
     return jsonify({
-        "default_recipients": default_list,
+        "default_recipients": DEFAULT_EMAIL_RECIPIENTS,
         "extra_recipients": extra_list,
         "has_email_config": True,
     })
@@ -578,9 +581,8 @@ def send_email_report():
 
     # Build recipient list
     settings = load_settings()
-    default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
     extra_list = settings.get("email_recipients", [])
-    all_recipients = list(set(default_list + extra_list + extra_to))
+    all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + extra_list + extra_to))
 
     if not all_recipients:
         return jsonify({"error": "수신자 이메일이 없습니다. 수신자를 추가해주세요."}), 400
@@ -1466,8 +1468,7 @@ def run_scheduled_analysis(target_date=None):
         # Phase 3: 이메일 전송
         date_str = str(target_date)
         html_body = build_email_html(results, date_str, market_data=market_data)
-        default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
-        all_recipients = list(set(default_list + settings.get("email_recipients", [])))
+        all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
             return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
