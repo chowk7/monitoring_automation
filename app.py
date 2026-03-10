@@ -32,7 +32,7 @@ SETTINGS_FILE = "settings.json"
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "")
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 # Email configuration
@@ -166,21 +166,27 @@ def save_settings(settings):
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file. Auto-initializes with DEFAULT_TICKERS on first run."""
-    tickers = []
-    if os.path.exists(TICKERS_CSV_FILE):
-        try:
-            with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if row and row[0].strip():
-                        tickers.append(row[0].strip().upper())
-        except Exception as e:
-            logger.error(f"Error reading CSV: {e}")
-    if not tickers:
+    """Load tickers from CSV file.
+
+    Auto-initializes with DEFAULT_TICKERS only on the very first run (file not found).
+    If the file exists (even empty – user explicitly cleared), respects that state.
+    """
+    if not os.path.exists(TICKERS_CSV_FILE):
+        # First run: file has never been created → seed with defaults
         tickers = list(DEFAULT_TICKERS)
         save_tickers_to_csv(tickers)
         logger.info(f"Initialized with {len(tickers)} default tickers.")
+        return tickers
+
+    tickers = []
+    try:
+        with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row and row[0].strip():
+                    tickers.append(row[0].strip().upper())
+    except Exception as e:
+        logger.error(f"Error reading CSV: {e}")
     return tickers
 
 
