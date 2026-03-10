@@ -48,17 +48,6 @@
                 <div id="tickerList" class="ticker-list">
                     <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
                 </div>
-
-                <!-- Analysis Date -->
-                <div class="date-row">
-                    <label for="analysisDate">분석 날짜 (KST)</label>
-                    <input type="date" id="analysisDate">
-                    <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
-                </div>
-
-                <button id="analyzeBtn" class="btn btn-analyze" disabled>
-                    <span class="btn-icon">&#9654;</span> 분석 실행
-                </button>
             </div>
         </section>
 
@@ -170,6 +159,30 @@
                     <p class="empty-message">추가 수신자가 없습니다.</p>
                 </div>
             </div>
+        </section>
+
+        <!-- Analyze Section (always visible) -->
+        <section class="card analyze-section">
+            <!-- Analysis Date -->
+            <div class="date-row" style="margin-bottom:14px;">
+                <label for="analysisDate">분석 날짜 (KST)</label>
+                <input type="date" id="analysisDate">
+                <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
+            </div>
+            <button id="analyzeBtn" class="btn btn-analyze" disabled>
+                <span class="btn-icon">&#9654;</span> 분석 실행
+            </button>
+
+            <!-- Webhook Info -->
+            <div class="webhook-info">
+                <span class="webhook-label">🔗 자동 실행 웹훅</span>
+                <code id="webhookUrl" class="webhook-url">로딩 중...</code>
+                <button id="copyWebhookBtn" class="btn btn-copy" title="URL 복사">복사</button>
+                <button id="regenTokenBtn" class="btn btn-copy" style="margin-left:4px;" title="토큰 재생성">재생성</button>
+            </div>
+            <small class="settings-hint" style="display:block;margin-top:6px;">
+                Google Cloud Scheduler에서 위 URL로 POST 요청 설정 · Header: <code>X-Webhook-Token: &lt;token&gt;</code>
+            </small>
         </section>
 
         <!-- Loading Section -->

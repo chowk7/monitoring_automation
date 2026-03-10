@@ -3,6 +3,7 @@ import gc
 import csv
 import json
 import logging
+import secrets
 import smtplib
 from datetime import datetime, timedelta, timezone, date as date_cls
 from email.mime.text import MIMEText
@@ -1391,6 +1392,159 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
         return response.text
     except Exception as e:
         return f"분석 실패: {str(e)}"
+
+
+# ─── Scheduled / Webhook Analysis ────────────────────────────────────────────
+
+def run_scheduled_analysis(target_date=None):
+    """비스트리밍 전체 분석 실행 후 이메일 발송. 웹훅에서 호출."""
+    try:
+        logger.info("Scheduled analysis started")
+        if target_date is None:
+            target_date = get_kst_today()
+
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+        change_threshold = float(settings.get("change_threshold", 5.0))
+        custom_query = settings.get("custom_query", "")
+        prompt_templates = {
+            "with_articles": settings.get("prompt_with_articles") or DEFAULT_PROMPT_WITH_ARTICLES,
+            "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
+        }
+
+        # Phase 0: 글로벌 지수
+        logger.info("Fetching market indices...")
+        indices_data = fetch_all_market_indices(target_date)
+        trade_date_str = next((i["date"] for i in indices_data if i.get("date")), str(target_date))
+        articles_by_region = {}
+        for region in MARKET_NEWS_REGIONS:
+            arts = search_market_news_for_region(region, trade_date_str, target_date)
+            if arts:
+                articles_by_region[region] = arts
+        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+        market_data = {"indices": indices_data, "analysis": market_analysis, "date": trade_date_str}
+        gc.collect()
+
+        # Phase 1: 종목 데이터 수집 + 필터링
+        logger.info("Fetching ticker data...")
+        ticker_objects = load_tickers_from_csv()
+        ticker_meta = {t["ticker"]: t for t in ticker_objects}
+        filtered_list = []
+        for t in ticker_objects:
+            result = fetch_single_ticker(t["ticker"], target_date=target_date)
+            if abs(result.get("change_pct", 0)) >= change_threshold:
+                filtered_list.append((t["ticker"], result))
+        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+        logger.info(f"Filtered {len(filtered_list)} tickers above threshold {change_threshold}%")
+        gc.collect()
+
+        # Phase 2: 종목별 뉴스 + Gemini 분석
+        results = []
+        for ticker, info in filtered_list:
+            try:
+                articles = search_all_news_articles(
+                    ticker, info.get("name", ticker), info.get("date", ""),
+                    target_date=target_date, custom_query=custom_query,
+                )
+                analysis = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
+                meta = ticker_meta.get(ticker, {})
+                results.append({
+                    "ticker": ticker,
+                    "name": info.get("name", ticker) or meta.get("name", ticker),
+                    "change_pct": info["change_pct"],
+                    "analysis": analysis,
+                    "articles_found": len(articles) > 0,
+                    "articles_count": len(articles),
+                    "articles_sources": list(set(a.get("source", "") for a in articles if a.get("source"))),
+                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in articles[:5]],
+                    "model_used": model,
+                })
+            except Exception as e:
+                logger.error(f"Scheduled analysis error for {ticker}: {e}")
+            gc.collect()
+
+        # Phase 3: 이메일 전송
+        date_str = str(target_date)
+        html_body = build_email_html(results, date_str, market_data=market_data)
+        default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
+        all_recipients = list(set(default_list + settings.get("email_recipients", [])))
+        if not all_recipients:
+            logger.warning("Scheduled analysis: no recipients configured, skipping email")
+            return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
+
+        subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {date_str}"
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_FROM
+        msg["To"] = ", ".join(all_recipients)
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+
+        logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
+        return {"status": "done", "sent": True, "recipients": all_recipients, "results_count": len(results), "date": date_str}
+
+    except Exception as e:
+        logger.error(f"Scheduled analysis failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+def _get_or_create_webhook_token():
+    """settings.json에 웹훅 토큰이 없으면 생성해서 저장."""
+    settings = load_settings()
+    token = settings.get("webhook_token", "")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        settings["webhook_token"] = token
+        save_settings(settings)
+    return token
+
+
+@app.route("/api/webhook/info", methods=["GET"])
+def webhook_info():
+    """웹훅 토큰 및 사용 방법 안내."""
+    token = _get_or_create_webhook_token()
+    return jsonify({
+        "token": token,
+        "endpoint": "/api/webhook/run-analysis",
+        "method": "POST",
+        "header": f"X-Webhook-Token: {token}",
+        "note": "Google Cloud Scheduler: POST to <your-url>/api/webhook/run-analysis with header X-Webhook-Token",
+    })
+
+
+@app.route("/api/webhook/token/regenerate", methods=["POST"])
+def regenerate_webhook_token():
+    """토큰 재생성."""
+    settings = load_settings()
+    settings["webhook_token"] = secrets.token_urlsafe(32)
+    save_settings(settings)
+    return jsonify({"token": settings["webhook_token"]})
+
+
+@app.route("/api/webhook/run-analysis", methods=["POST"])
+def webhook_run_analysis():
+    """외부 스케줄러(Google Cloud Scheduler 등)에서 호출하는 웹훅 엔드포인트."""
+    # 토큰 인증
+    token = _get_or_create_webhook_token()
+    req_token = request.headers.get("X-Webhook-Token") or request.args.get("token", "")
+    if not secrets.compare_digest(req_token, token):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # 날짜 파라미터 (없으면 오늘 KST)
+    date_str = request.args.get("date", "") or (request.get_json(silent=True) or {}).get("date", "")
+    target_date = None
+    if date_str:
+        try:
+            target_date = date_cls.fromisoformat(date_str)
+        except ValueError:
+            pass
+
+    result = run_scheduled_analysis(target_date=target_date)
+    return jsonify(result)
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

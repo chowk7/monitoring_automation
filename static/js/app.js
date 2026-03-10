@@ -88,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadTickers();
     loadSettings();
     loadEmailRecipients();
+    loadWebhookInfo();
 
     // ─── Event Listeners ─────────────────────────────────────────────────
 
@@ -352,6 +353,53 @@ document.addEventListener("DOMContentLoaded", () => {
         analyzeBtn.disabled = false;
         if (stopBtn) stopBtn.style.display = "none";
         showSuccess("분석이 중지되었습니다. 지금까지의 결과는 유지됩니다.");
+    }
+
+    // ─── Webhook Functions ────────────────────────────────────────────────
+
+    async function loadWebhookInfo() {
+        try {
+            const resp = await fetch("/api/webhook/info");
+            const data = await resp.json();
+            updateWebhookDisplay(data.token);
+        } catch (err) {
+            console.error("Failed to load webhook info:", err);
+        }
+    }
+
+    function updateWebhookDisplay(token) {
+        const urlEl = document.getElementById("webhookUrl");
+        if (urlEl) {
+            const base = window.location.origin;
+            urlEl.textContent = `${base}/api/webhook/run-analysis?token=${token}`;
+        }
+    }
+
+    const copyWebhookBtn = document.getElementById("copyWebhookBtn");
+    if (copyWebhookBtn) {
+        copyWebhookBtn.addEventListener("click", () => {
+            const urlEl = document.getElementById("webhookUrl");
+            if (urlEl) {
+                navigator.clipboard.writeText(urlEl.textContent).then(() => {
+                    showSuccess("웹훅 URL이 복사되었습니다.");
+                });
+            }
+        });
+    }
+
+    const regenTokenBtn = document.getElementById("regenTokenBtn");
+    if (regenTokenBtn) {
+        regenTokenBtn.addEventListener("click", async () => {
+            if (!confirm("토큰을 재생성하면 기존 스케줄러 설정을 업데이트해야 합니다. 계속하시겠습니까?")) return;
+            try {
+                const resp = await fetch("/api/webhook/token/regenerate", { method: "POST" });
+                const data = await resp.json();
+                updateWebhookDisplay(data.token);
+                showSuccess("토큰이 재생성되었습니다. 스케줄러 URL을 업데이트해주세요.");
+            } catch (err) {
+                showError("토큰 재생성 실패");
+            }
+        });
     }
 
     // ─── Email Recipient Functions ────────────────────────────────────────
