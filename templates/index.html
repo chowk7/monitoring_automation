@@ -62,6 +62,19 @@
                 <button class="btn btn-toggle" id="settingsToggle">접기 ▲</button>
             </div>
             <div id="settingsBody">
+                <!-- Change Rate Threshold -->
+                <div class="settings-row">
+                    <label for="thresholdInput">분석 기준 변동률</label>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="number" id="thresholdInput" class="model-select"
+                               min="0.1" max="100" step="0.5" style="width:90px;"
+                               placeholder="5">
+                        <span style="color:var(--text-muted,#aaa);">%</span>
+                        <button id="saveThresholdBtn" class="btn btn-save-model">저장</button>
+                    </div>
+                    <small class="settings-hint">절대 변동률이 이 값 이상인 종목만 AI 분석합니다 (기본값: 5%)</small>
+                </div>
+
                 <!-- Gemini Model Selection (수동 입력 가능) -->
                 <div class="settings-row">
                     <label for="modelSelect">Gemini 모델</label>

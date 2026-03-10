@@ -145,6 +145,7 @@ def load_settings():
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
         "custom_query": "",
+        "change_threshold": 5.0,
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -355,6 +356,13 @@ def update_settings():
         settings["prompt_without_articles"] = data["prompt_without_articles"]
     if "custom_query" in data:
         settings["custom_query"] = data["custom_query"]
+    if "change_threshold" in data:
+        try:
+            val = float(data["change_threshold"])
+            if 0 < val <= 100:
+                settings["change_threshold"] = val
+        except (TypeError, ValueError):
+            pass
     save_settings(settings)
     return jsonify(settings)
 
@@ -515,6 +523,7 @@ def analyze_stream():
 
     settings = load_settings()
     model = request.args.get("model", settings.get("gemini_model", DEFAULT_GEMINI_MODEL))
+    change_threshold = float(request.args.get("threshold", settings.get("change_threshold", 5.0)))
 
     # Target date: from query param (KST) or today KST
     date_str = request.args.get("date", "")
@@ -560,7 +569,7 @@ def analyze_stream():
                 if "error" in result:
                     all_stocks_slim[ticker]["error"] = result["error"]
 
-                if abs(result.get("change_pct", 0)) >= 5.0:
+                if abs(result.get("change_pct", 0)) >= change_threshold:
                     filtered_list.append((ticker, result))
 
             gc.collect()
@@ -571,7 +580,7 @@ def analyze_stream():
         log_memory("AFTER FETCH")
 
         if not filtered_list:
-            yield f"data: {json.dumps({'type': 'done', 'message': 'No stocks with +/- 5% change found.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'message': f'변동률 {change_threshold:g}% 이상인 종목이 없습니다.'})}\n\n"
             return
 
         # Sort filtered list

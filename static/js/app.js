@@ -50,6 +50,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const customQueryInput = document.getElementById("customQueryInput");
     const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
 
+    // Threshold elements
+    const thresholdInput = document.getElementById("thresholdInput");
+    const saveThresholdBtn = document.getElementById("saveThresholdBtn");
+    let currentThreshold = 5.0;
+
     // Store analysis results for email sending
     let currentResults = [];
     // Store default prompts for reset
@@ -153,6 +158,11 @@ document.addEventListener("DOMContentLoaded", () => {
         saveCustomQueryBtn.addEventListener("click", saveCustomQuery);
     }
 
+    // Save threshold
+    if (saveThresholdBtn) {
+        saveThresholdBtn.addEventListener("click", saveThreshold);
+    }
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -217,6 +227,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 customQueryInput.value = data.custom_query || "";
             }
 
+            // Load change threshold
+            if (data.change_threshold !== undefined) {
+                currentThreshold = parseFloat(data.change_threshold) || 5.0;
+                if (thresholdInput) thresholdInput.value = currentThreshold;
+            }
+
         } catch (err) {
             console.error("Failed to load settings:", err);
         }
@@ -254,6 +270,29 @@ document.addEventListener("DOMContentLoaded", () => {
                 showSuccess("프롬프트 저장됨");
             } else {
                 showError("프롬프트 저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
+        }
+    }
+
+    async function saveThreshold() {
+        const val = thresholdInput ? parseFloat(thresholdInput.value) : NaN;
+        if (isNaN(val) || val <= 0 || val > 100) {
+            showError("변동률은 0 초과 100 이하 숫자로 입력해주세요.");
+            return;
+        }
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ change_threshold: val }),
+            });
+            if (resp.ok) {
+                currentThreshold = val;
+                showSuccess(`기준 변동률 저장됨: ${val}%`);
+            } else {
+                showError("저장 실패");
             }
         } catch (err) {
             showError("저장 오류");
@@ -689,7 +728,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 continue;
             }
             const cls = info.change_pct > 0 ? "positive" : info.change_pct < 0 ? "negative" : "neutral";
-            const filtered = Math.abs(info.change_pct) >= 5 ? " filtered" : "";
+            const filtered = Math.abs(info.change_pct) >= currentThreshold ? " filtered" : "";
             const sign = info.change_pct > 0 ? "+" : "";
             const displayName = info.name || ticker;
             overviewHtml += `<div class="overview-item ${cls}${filtered}">${escapeHtml(displayName)} ${sign}${info.change_pct.toFixed(1)}%</div>`;
