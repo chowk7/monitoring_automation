@@ -99,7 +99,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderIndices(data) {
-        let latestDate = "";
+        // Collect the representative local date per region (first valid index)
+        const regionDates = {};
 
         for (const [region, indices] of Object.entries(data)) {
             const container = REGION_CONTAINERS[region];
@@ -115,7 +116,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     continue;
                 }
 
-                if (idx.date && idx.date > latestDate) latestDate = idx.date;
+                if (idx.date && !(region in regionDates)) regionDates[region] = idx.date;
 
                 const sign = idx.change_pct >= 0 ? "+" : "";
                 const cls  = idx.change_pct > 0 ? "positive" : idx.change_pct < 0 ? "negative" : "neutral";
@@ -132,9 +133,12 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
-        if (latestDate && indicesDate) {
-            indicesDate.textContent = `(${latestDate} 기준)`;
-            _cachedReportDate = latestDate;
+        if (Object.keys(regionDates).length && indicesDate) {
+            const label = Object.entries(regionDates)
+                .map(([r, d]) => `${r} ${d}`)
+                .join(" | ");
+            indicesDate.textContent = `(현지 기준: ${label})`;
+            _cachedReportDate = Object.values(regionDates).sort().at(-1); // latest for email subject
         }
     }
 

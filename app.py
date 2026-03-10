@@ -6,7 +6,8 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
@@ -401,7 +402,15 @@ def fetch_index_data(symbol, name):
         last_close = valid[-1][1]
         change = last_close - prev_close
         change_pct = (change / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0]).strftime("%Y-%m-%d")
+
+        # Convert timestamp to exchange's local date
+        tz_name = meta.get("exchangeTimezoneName", "UTC")
+        try:
+            tz = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+        last_dt = datetime.fromtimestamp(valid[-1][0], tz=tz)
+        last_date = last_dt.strftime("%Y-%m-%d")
 
         return {
             "symbol": symbol,
@@ -410,6 +419,7 @@ def fetch_index_data(symbol, name):
             "change": round(float(change), 2),
             "change_pct": round(float(change_pct), 2),
             "date": last_date,
+            "timezone": tz_name,
         }
     except Exception as e:
         return {"symbol": symbol, "name": name, "error": str(e)}
@@ -425,24 +435,29 @@ def get_indices_news_summary(indices_data):
         return "Gemini 클라이언트 초기화 실패."
 
     context_lines = []
+    # Collect representative local date per region (from first valid index)
+    region_dates = {}
     for region, indices in indices_data.items():
         context_lines.append(f"\n[{region}]")
         for idx in indices:
             if "error" not in idx:
                 sign = "+" if idx["change_pct"] >= 0 else ""
                 context_lines.append(
-                    f"  - {idx['name']}: {idx['value']:,.2f} ({sign}{idx['change_pct']:.2f}%)"
+                    f"  - {idx['name']}: {idx['value']:,.2f} ({sign}{idx['change_pct']:.2f}%) [{idx['date']} 기준]"
                 )
+                if region not in region_dates:
+                    region_dates[region] = idx["date"]
             else:
                 context_lines.append(f"  - {idx['name']}: 데이터 오류")
 
     context = "\n".join(context_lines)
-    today = datetime.now().strftime("%Y년 %m월 %d일")
+    date_info = " | ".join(f"{r}: {d}" for r, d in region_dates.items())
+    today = date_info if date_info else datetime.now().strftime("%Y-%m-%d")
 
     prompt = f"""당신은 글로벌 금융 시장 전문 애널리스트입니다.
-오늘 날짜: {today}
+각 지역별 현지 기준 날짜: {today}
 
-아래는 주요 글로벌 주가 지수 현황입니다:
+아래는 주요 글로벌 주가 지수 현황입니다 (각 수치는 해당 거래소의 현지 날짜 기준):
 {context}
 
 위 지수들의 움직임을 분석하고, 각 지역별 주요 이슈와 뉴스를 한글로 정리해주세요.
