@@ -41,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // CSV upload elements
     const csvUploadInput = document.getElementById("csvUploadInput");
     const csvUploadBtn = document.getElementById("csvUploadBtn");
+    const resetDefaultsBtn = document.getElementById("resetDefaultsBtn");
 
     // Store analysis results for email sending
     let currentResults = [];
@@ -128,6 +129,11 @@ document.addEventListener("DOMContentLoaded", () => {
         csvUploadInput.addEventListener("change", uploadCsvFile);
     }
 
+    // Reset to default tickers
+    if (resetDefaultsBtn) {
+        resetDefaultsBtn.addEventListener("click", resetToDefaultTickers);
+    }
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -193,7 +199,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function saveModel() {
-        const model = modelSelect.value;
+        const model = (modelSelect.value || "").trim();
+        if (!model) { showError("모델명을 입력해주세요."); return; }
         try {
             const resp = await fetch("/api/settings", {
                 method: "POST",
@@ -442,6 +449,22 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function resetToDefaultTickers() {
+        if (!confirm("현재 종목 목록을 디폴트 종목으로 교체하시겠습니까?")) return;
+        try {
+            const resp = await fetch("/api/tickers/reset-defaults", { method: "POST" });
+            const data = await resp.json();
+            if (resp.ok) {
+                renderTickers(data.tickers);
+                showSuccess(`디폴트 종목 ${data.count}개로 초기화됨`);
+            } else {
+                showError(data.error || "초기화 실패");
+            }
+        } catch (err) {
+            showError("서버 오류");
+        }
+    }
+
     async function uploadCsvFile(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -503,7 +526,7 @@ document.addEventListener("DOMContentLoaded", () => {
         analysisResults.innerHTML = "";
         currentResults = [];
 
-        const selectedModel = modelSelect ? modelSelect.value : "gemini-2.5-pro";
+        const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
 
         // Use SSE for streaming

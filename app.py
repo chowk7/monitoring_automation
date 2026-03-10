@@ -43,49 +43,59 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USER)
 EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients
 
-# Available Gemini models
+# Available Gemini models (for autocomplete suggestions; manual input also allowed)
 AVAILABLE_GEMINI_MODELS = [
     {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro (기본값)"},
     {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (빠름)"},
     {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite (최고속)"},
     {"id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro"},
-    {"id": "gemini-3-pro", "label": "Gemini 3 Pro (최신)"},
+    {"id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash"},
+    {"id": "gemini-2.5-flash-preview-04-17", "label": "Gemini 2.5 Flash Preview"},
 ]
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+
+# Default tickers pre-loaded on first run
+DEFAULT_TICKERS = [
+    "IFX.DE", "NXPI", "STMPA.PA", "ON", "WOLF", "6723.T",
+    "NVDA", "AMD", "ARM", "QCOM", "INTC", "AVGO", "MRVL", "MU",
+    "000660.KS", "WDC", "SNDK", "285A.T", "2330.TW", "GFS", "0981.HK",
+    "ASML.AS", "CIEN", "NOKIA.HE", "ERIC-B.ST", "CSCO", "068270.KS",
+    "BIIB", "OGN", "MRNA", "PFE", "AMGN", "ROG.SW", "LLY", "NVO",
+    "4523.T", "LONN.SW", "4901.T", "OXB.L", "2269.HK", "2359.HK",
+    "BANB.SW", "PPGN.SW", "GEHC", "PHIA.AS", "SHL.DE",
+    "PACB", "TEM", "GH", "ILMN", "GRAL",
+    "JCI", "TT", "CARR", "LII", "VRT", "ELUX-B.ST", "WHR",
+    "APTV", "AMV0.DE", "TSLA", "MBLY", "VOW.DE", "002594.SZ", "005380.KS",
+    "RBLX", "U", "3659.T",
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "9988.HK", "6758.T", "373220.KS",
+    "GLW", "6324.T",
+    "005930.KS", "005935.KS", "028260.KS", "006400.KS", "018260.KS",
+    "032830.KS", "009150.KS", "000810.KS", "029780.KS", "008770.KS",
+    "012750.KS", "010140.KS", "016360.KS", "028050.KS", "030000.KS",
+    "0126z0.KS", "207940.KS",
+]
 
 # Default Gemini prompt templates
 # Available variables: {name}, {ticker}, {change_pct}, {trade_date}
 # Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
-DEFAULT_PROMPT_WITH_ARTICLES = """You are a stock market analyst. External news articles were collected from {sources_label} for this stock. Use them as a primary reference, AND also leverage your own latest knowledge to provide a comprehensive analysis.
+DEFAULT_PROMPT_WITH_ARTICLES = """You are a stock market analyst. The following news articles were collected for this stock on or around the analysis date.
 
 Stock: {name} ({ticker})
 Change: {change_pct}%
 Date: {trade_date}
 
-외부 수집 뉴스 기사 ({articles_count}건, 출처: {sources_label}):
+수집된 뉴스 기사 ({articles_count}건, 출처: {sources_label}):
 {articles_text}
 
 Instructions:
 1. 출력은 한글로 해라.
-2. 위 뉴스 기사를 1차 참고하고, 당신이 알고 있는 최신 정보도 함께 활용하여 주가 변동의 핵심 원인을 1-2문장으로 간결하게 분석해라. (명사형 종결)
+2. 제공된 기사 내용만을 근거로 주가 변동 이유를 2문장 이내로 간결하게 정리해라. (명사형 종결)
 3. 종목명이나 변동률은 출력하지 마라.
-4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 당신의 지식으로 보완해라.
-5. 예시: "AI 반도체 수요 증가 기대감 및 실적 서프라이즈로 상승"
-6. 한글 분석 후 영어로 한 문장 요약 추가."""
+4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 "개별이슈 미발견"으로만 출력해라.
+5. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+6. 유효한 분석이 있는 경우에만 한글 분석 후 영어로 한 문장 요약 추가. "개별이슈 미발견"인 경우 영어 요약 생략."""
 
-DEFAULT_PROMPT_WITHOUT_ARTICLES = """You are a stock market analyst. No external news articles were found for this stock. Use your own web search capabilities and latest knowledge to analyze the price movement.
-
-Stock: {name} ({ticker})
-Change: {change_pct}%
-Date: {trade_date}
-
-Instructions:
-1. 출력은 한글로 해라.
-2. 당신의 최신 지식으로 1-2문장 간결하게 원인을 분석해라. (명사형 종결)
-3. 종목명이나 변동률은 출력하지 마라.
-4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
-5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
-6. 한글 분석 후 영어로 한 문장 요약 추가."""
+DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
@@ -156,7 +166,7 @@ def save_settings(settings):
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file."""
+    """Load tickers from CSV file. Auto-initializes with DEFAULT_TICKERS on first run."""
     tickers = []
     if os.path.exists(TICKERS_CSV_FILE):
         try:
@@ -167,6 +177,10 @@ def load_tickers_from_csv():
                         tickers.append(row[0].strip().upper())
         except Exception as e:
             logger.error(f"Error reading CSV: {e}")
+    if not tickers:
+        tickers = list(DEFAULT_TICKERS)
+        save_tickers_to_csv(tickers)
+        logger.info(f"Initialized with {len(tickers)} default tickers.")
     return tickers
 
 
@@ -246,6 +260,13 @@ def clear_tickers():
     """Clear all tickers."""
     save_tickers_to_csv([])
     return jsonify({"tickers": [], "message": "All tickers cleared"})
+
+
+@app.route("/api/tickers/reset-defaults", methods=["POST"])
+def reset_tickers_to_defaults():
+    """Reset tickers to the built-in default list."""
+    save_tickers_to_csv(DEFAULT_TICKERS)
+    return jsonify({"tickers": list(DEFAULT_TICKERS), "count": len(DEFAULT_TICKERS)})
 
 
 @app.route("/api/tickers/upload", methods=["POST"])
@@ -894,6 +915,20 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None)
             seen_titles.add(t)
             unique.append(a)
 
+    # Filter by date: keep only articles from target_date or later.
+    # Articles with no date field are kept (date unknown).
+    # If all articles are older than target_date, return empty → "개별이슈 미발견"
+    if target_date:
+        date_threshold = str(target_date)
+        date_filtered = [
+            a for a in unique
+            if not a.get("date") or a["date"] >= date_threshold
+        ]
+        logger.info(
+            f"Date filter ({date_threshold}): {len(unique)} → {len(date_filtered)} articles for {ticker}"
+        )
+        unique = date_filtered
+
     logger.info(f"Total unique articles for {ticker}: {len(unique)}")
     return unique[:10]
 
@@ -921,34 +956,28 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
 
     templates = prompt_templates or {}
 
-    if articles:
-        sources_used = list(set(a.get("source", "") for a in articles if a.get("source")))
-        sources_label = ", ".join(sources_used) if sources_used else "외부 검색"
-        articles_text = "\n".join([
-            f"  [{i+1}] [{a.get('source', '')}] {a['title']}" +
-            (f"\n      {a['snippet']}" if a.get('snippet') else "")
-            for i, a in enumerate(articles[:8])
-        ])
-        tmpl = templates.get("with_articles") or DEFAULT_PROMPT_WITH_ARTICLES
-        prompt = apply_template(
-            tmpl,
-            name=name,
-            ticker=ticker,
-            change_pct=f"{change_pct:+.1f}",
-            trade_date=trade_date,
-            articles_text=articles_text,
-            sources_label=sources_label,
-            articles_count=len(articles),
-        )
-    else:
-        tmpl = templates.get("without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES
-        prompt = apply_template(
-            tmpl,
-            name=name,
-            ticker=ticker,
-            change_pct=f"{change_pct:+.1f}",
-            trade_date=trade_date,
-        )
+    if not articles:
+        # No articles from the analysis date → no speculation, return directly
+        return "개별이슈 미발견."
+
+    sources_used = list(set(a.get("source", "") for a in articles if a.get("source")))
+    sources_label = ", ".join(sources_used) if sources_used else "외부 검색"
+    articles_text = "\n".join([
+        f"  [{i+1}] [{a.get('source', '')}] {a['title']}" +
+        (f"\n      {a['snippet']}" if a.get('snippet') else "")
+        for i, a in enumerate(articles[:8])
+    ])
+    tmpl = templates.get("with_articles") or DEFAULT_PROMPT_WITH_ARTICLES
+    prompt = apply_template(
+        tmpl,
+        name=name,
+        ticker=ticker,
+        change_pct=f"{change_pct:+.1f}",
+        trade_date=trade_date,
+        articles_text=articles_text,
+        sources_label=sources_label,
+        articles_count=len(articles),
+    )
 
     try:
         response = client.models.generate_content(
