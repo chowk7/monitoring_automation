@@ -31,7 +31,8 @@ SETTINGS_FILE = "settings.json"
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+# Google CSE uses the same API key as Gemini by default
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "") or GEMINI_API_KEY
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
