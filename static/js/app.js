@@ -64,7 +64,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const marketIndicesSection = document.getElementById("marketIndicesSection");
     const marketIndicesGrid = document.getElementById("marketIndicesGrid");
     const marketIndicesAnalysis = document.getElementById("marketIndicesAnalysis");
-    const marketIndicesArticles = document.getElementById("marketIndicesArticles");
 
     // Store analysis results for email sending
     let currentResults = [];
@@ -353,6 +352,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const configWarning = document.getElementById("emailConfigWarning");
             if (configWarning) {
                 configWarning.style.display = data.has_email_config ? "none" : "block";
+                const missingEl = document.getElementById("emailMissingVars");
+                if (missingEl && data.missing_vars && data.missing_vars.length > 0) {
+                    missingEl.textContent = data.missing_vars.join(", ");
+                }
             }
 
             // Show/update send email button visibility
@@ -672,7 +675,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentResults = [];
         currentMarketData = null;
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
-        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; marketIndicesArticles.style.display = "none"; }
+        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -795,30 +798,6 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.analysis) {
             marketIndicesAnalysis.textContent = data.analysis;
             marketIndicesAnalysis.style.display = "block";
-        }
-
-        // Render articles by region
-        const articlesByRegion = data.articles_by_region || {};
-        const regionEntries = Object.entries(articlesByRegion).filter(([, arts]) => arts && arts.length > 0);
-        if (regionEntries.length > 0) {
-            let html = '<div class="market-articles-section"><h4>📰 지수 관련 뉴스</h4>';
-            for (const [region, arts] of regionEntries) {
-                const items = arts.map(a => {
-                    const datePart = a.date ? `<span class="article-date">${escapeHtml(a.date)}</span> ` : "";
-                    const srcPart = a.source ? ` <small>(${escapeHtml(a.source)})</small>` : "";
-                    const title = a.link
-                        ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
-                        : escapeHtml(a.title);
-                    return `<li>${datePart}${title}${srcPart}</li>`;
-                }).join("");
-                html += `<div class="market-articles-region">
-                    <span class="region-label">${escapeHtml(region)}</span>
-                    <ul>${items}</ul>
-                </div>`;
-            }
-            html += "</div>";
-            marketIndicesArticles.innerHTML = html;
-            marketIndicesArticles.style.display = "block";
         }
 
         marketIndicesSection.style.display = "block";

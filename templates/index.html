@@ -151,7 +151,8 @@
             </div>
             <div id="emailBody">
                 <div id="emailConfigWarning" class="config-warning" style="display:none;">
-                    ⚠️ SMTP 설정이 없습니다. SMTP_USER, SMTP_PASSWORD 환경변수를 설정해야 이메일 발송이 가능합니다.
+                    ⚠️ SMTP 설정이 없습니다. <span id="emailMissingVars"></span> 환경변수를 설정해야 이메일 발송이 가능합니다.
+                    <br><small style="color:#7a8a9e;">Render 배포시: Dashboard → Environment → 해당 키 직접 입력</small>
                 </div>
 
                 <!-- Default recipients (from ENV) -->
@@ -197,7 +198,6 @@
                 <h3 style="margin-bottom:10px;">글로벌 시장 지수</h3>
                 <div id="marketIndicesGrid" class="market-indices-grid"></div>
                 <div id="marketIndicesAnalysis" class="market-analysis-box" style="display:none;"></div>
-                <div id="marketIndicesArticles" style="display:none;"></div>
             </div>
 
             <!-- Category averages -->

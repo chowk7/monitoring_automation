@@ -527,10 +527,16 @@ def get_email_recipients():
     settings = load_settings()
     default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
     extra_list = settings.get("email_recipients", [])
+    missing = []
+    if not SMTP_USER:
+        missing.append("SMTP_USER")
+    if not SMTP_PASSWORD:
+        missing.append("SMTP_PASSWORD")
     return jsonify({
         "default_recipients": default_list,
         "extra_recipients": extra_list,
         "has_email_config": bool(SMTP_USER and SMTP_PASSWORD),
+        "missing_vars": missing,
     })
 
 
@@ -1094,11 +1100,14 @@ def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=N
 {articles_text}
 
 Instructions:
-1. 출력은 한글로 해라.
-2. 미국·한국·중국/홍콩·일본·유럽 시장별로 등락 원인을 뉴스 근거로 1-2문장씩 간결하게 설명해라.
-3. 뉴스 근거가 없는 지역은 "정보 없음"으로 표시해라.
-4. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
-5. 마지막에 전체 시장 분위기를 1문장으로 요약해라."""
+1. 미국·한국·중국/홍콩·일본·유럽 시장별로 등락 원인을 뉴스 근거로 1-2문장씩 간결하게 설명해라.
+2. 뉴스 근거가 없는 지역은 "정보 없음 / No data"으로 표시해라.
+3. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+4. 마지막에 전체 시장 분위기를 1문장으로 요약해라.
+5. 각 문장을 한글로 먼저 쓰고, 바로 아래에 영문 번역을 함께 출력해라. 예시:
+   🇺🇸 미국: 고용지표 호조로 나스닥 상승.
+   🇺🇸 US: Nasdaq rose on strong jobs data.
+   (각 지역마다 동일하게 한글→영문 순서로)"""
 
     try:
         response = client.models.generate_content(model=model, contents=prompt)
