@@ -51,6 +51,18 @@
                 <h3 class="news-title">뉴스 &amp; 시장 분석 <span class="news-badge">Gemini 2.5 Pro</span></h3>
                 <div id="newsSummaryText" class="news-content"></div>
             </div>
+
+            <!-- Email Send UI -->
+            <div id="emailSection" style="display:none;">
+                <div class="news-divider"></div>
+                <div class="email-row">
+                    <span class="email-icon">&#9993;</span>
+                    <input type="email" id="emailInput" class="email-input"
+                           placeholder="수신 이메일 주소" autocomplete="email">
+                    <button id="emailSendBtn" class="btn btn-email">발송</button>
+                    <span id="emailStatus" class="email-status"></span>
+                </div>
+            </div>
         </section>
 
         <!-- Ticker Input Section -->

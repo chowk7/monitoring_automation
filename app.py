@@ -3,6 +3,9 @@ import gc
 import csv
 import json
 import logging
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, Response
 import requests
@@ -27,6 +30,12 @@ TICKERS_CSV_FILE = "tickers.csv"
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+# SMTP Configuration
+SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER     = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
@@ -489,6 +498,134 @@ def indices_stream():
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
+
+
+# ─── Email ────────────────────────────────────────────────────────────────────
+
+def build_email_html(indices_data, news_summary, report_date):
+    """Build HTML email body from indices data and news summary."""
+
+    def change_color(pct):
+        if pct > 0:
+            return "#22c55e"
+        if pct < 0:
+            return "#ef4444"
+        return "#94a3b8"
+
+    region_icons = {"미국": "🇺🇸", "아시아": "🌏", "유럽": "🇪🇺"}
+
+    rows_html = ""
+    for region, indices in indices_data.items():
+        icon = region_icons.get(region, "")
+        rows_html += f"""
+        <tr><td colspan="3" style="padding:12px 16px 6px;font-size:0.8rem;font-weight:700;
+            color:#94a3b8;background:#0f1923;border-bottom:1px solid #2a3a4a;">
+            {icon} {region}
+        </td></tr>"""
+        for idx in indices:
+            if "error" in idx:
+                rows_html += f"""
+                <tr><td style="padding:8px 16px;color:#94a3b8;">{idx['name']}</td>
+                <td colspan="2" style="color:#ef4444;font-size:0.8rem;">데이터 오류</td></tr>"""
+                continue
+            sign = "+" if idx["change_pct"] >= 0 else ""
+            color = change_color(idx["change_pct"])
+            val = f"{idx['value']:,.2f}"
+            rows_html += f"""
+            <tr style="border-bottom:1px solid #1e2f3f;">
+                <td style="padding:8px 16px;color:#e0e6ed;font-size:0.88rem;">{idx['name']}</td>
+                <td style="padding:8px 16px;color:#e0e6ed;font-weight:700;font-size:0.88rem;
+                    text-align:right;">{val}</td>
+                <td style="padding:8px 16px;color:{color};font-weight:700;font-size:0.88rem;
+                    text-align:right;">{sign}{idx['change_pct']:.2f}%</td>
+            </tr>"""
+
+    # Convert markdown news to simple HTML paragraphs
+    news_html = ""
+    for line in news_summary.split("\n"):
+        t = line.strip()
+        if not t:
+            continue
+        if t.startswith("## "):
+            news_html += f'<h3 style="color:#818cf8;font-size:0.95rem;margin:16px 0 6px;padding-left:10px;border-left:3px solid #6366f1;">{t[3:]}</h3>'
+        elif t.startswith("- "):
+            news_html += f'<p style="color:#94a3b8;font-size:0.88rem;margin:4px 0 4px 14px;">• {t[2:]}</p>'
+        else:
+            news_html += f'<p style="color:#b0c4de;font-size:0.88rem;margin:6px 0;">{t}</p>'
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#0f1923;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+  <div style="max-width:640px;margin:32px auto;background:#1a2634;border:1px solid #2a3a4a;border-radius:12px;overflow:hidden;">
+    <div style="padding:24px 28px;background:#0f1923;border-bottom:1px solid #2a3a4a;">
+      <h1 style="margin:0;color:#fff;font-size:1.2rem;">글로벌 주요 지수 리포트</h1>
+      <p style="margin:4px 0 0;color:#5a6a7a;font-size:0.82rem;">{report_date} 기준</p>
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+      <thead>
+        <tr style="background:#253547;">
+          <th style="padding:8px 16px;text-align:left;color:#7a8a9e;font-size:0.78rem;font-weight:600;">지수</th>
+          <th style="padding:8px 16px;text-align:right;color:#7a8a9e;font-size:0.78rem;font-weight:600;">현재가</th>
+          <th style="padding:8px 16px;text-align:right;color:#7a8a9e;font-size:0.78rem;font-weight:600;">등락률</th>
+        </tr>
+      </thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+    <div style="padding:20px 28px;border-top:1px solid #2a3a4a;">
+      <h2 style="color:#c8d6e5;font-size:0.95rem;margin:0 0 12px;">뉴스 &amp; 시장 분석
+        <span style="font-size:0.7rem;background:rgba(99,102,241,0.2);color:#818cf8;
+          padding:2px 8px;border-radius:10px;margin-left:8px;font-weight:500;">Gemini 2.5 Pro</span>
+      </h2>
+      {news_html}
+    </div>
+    <div style="padding:14px 28px;background:#0f1923;border-top:1px solid #2a3a4a;
+        text-align:center;color:#3a4a5a;font-size:0.75rem;">
+      Stock Movement Analyzer · 자동 발송 리포트
+    </div>
+  </div>
+</body></html>"""
+
+
+@app.route("/api/send-email", methods=["POST"])
+def send_email():
+    """Send indices report email."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return jsonify({"error": "SMTP 설정이 없습니다. 환경변수(SMTP_USER, SMTP_PASSWORD)를 확인하세요."}), 400
+
+    data = request.get_json()
+    to_email     = data.get("to_email", "").strip()
+    indices_data = data.get("indices_data", {})
+    news_summary = data.get("news_summary", "")
+    report_date  = data.get("report_date", datetime.now().strftime("%Y-%m-%d"))
+
+    if not to_email:
+        return jsonify({"error": "수신 이메일을 입력해주세요."}), 400
+
+    try:
+        html_body = build_email_html(indices_data, news_summary, report_date)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[주식 리포트] 글로벌 주요 지수 현황 ({report_date})"
+        msg["From"]    = SMTP_USER
+        msg["To"]      = to_email
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+
+        logger.info(f"Email sent to {to_email}")
+        return jsonify({"message": f"{to_email}로 발송 완료!"})
+
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"error": "SMTP 인증 실패. 계정/비밀번호를 확인하세요."}), 500
+    except smtplib.SMTPException as e:
+        return jsonify({"error": f"SMTP 오류: {str(e)}"}), 500
+    except Exception as e:
+        logger.error(f"Email send failed: {e}")
+        return jsonify({"error": f"발송 실패: {str(e)}"}), 500
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────

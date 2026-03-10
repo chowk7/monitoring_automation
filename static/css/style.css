@@ -637,6 +637,68 @@ header h1 {
     }
 }
 
+/* ─── Email Send UI ──────────────────────────────────────────────────────── */
+.email-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.email-icon {
+    font-size: 1.1rem;
+    color: #6366f1;
+    flex-shrink: 0;
+}
+
+.email-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 9px 14px;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    background: #0f1923;
+    color: #e0e6ed;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.email-input:focus {
+    border-color: #6366f1;
+}
+
+.email-input::placeholder {
+    color: #4a5a6a;
+}
+
+.btn-email {
+    background: #6366f1;
+    color: #fff;
+    padding: 9px 20px;
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.btn-email:hover:not(:disabled) {
+    background: #4f46e5;
+}
+
+.btn-email:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.email-status {
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.email-status.success { color: #34d399; }
+.email-status.error   { color: #f87171; }
+.email-status.sending { color: #818cf8; }
+
 /* ─── Error & Success ────────────────────────────────────────────────────── */
 .error-section {
     border-color: #ef4444;

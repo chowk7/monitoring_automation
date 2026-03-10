@@ -20,7 +20,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const asiaIndices       = document.getElementById("asiaIndices");
     const euIndices         = document.getElementById("euIndices");
 
+    const emailSection  = document.getElementById("emailSection");
+    const emailInput    = document.getElementById("emailInput");
+    const emailSendBtn  = document.getElementById("emailSendBtn");
+    const emailStatus   = document.getElementById("emailStatus");
+
     const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
+
+    // Cached data for email payload
+    let _cachedIndicesData = null;
+    let _cachedNewsSummary = "";
+    let _cachedReportDate  = "";
 
     if (indicesBtn) {
         indicesBtn.addEventListener("click", fetchIndices);
@@ -33,6 +43,8 @@ document.addEventListener("DOMContentLoaded", () => {
         indicesLoading.style.display = "block";
         indicesLoadingText.textContent = "데이터 수집 중...";
         newsSummaryText.innerHTML = "";
+        emailSection.style.display = "none";
+        emailStatus.textContent = "";
         [usIndices, asiaIndices, euIndices].forEach(el => { el.innerHTML = ""; });
 
         const es = new EventSource("/api/indices/stream");
@@ -47,12 +59,14 @@ document.addEventListener("DOMContentLoaded", () => {
                         break;
 
                     case "indices":
+                        _cachedIndicesData = msg.data;
                         renderIndices(msg.data);
                         indicesLoading.style.display = "none";
                         indicesData.style.display = "block";
                         break;
 
                     case "news":
+                        _cachedNewsSummary = msg.summary;
                         renderNews(msg.summary);
                         indicesNews.style.display = "block";
                         break;
@@ -61,6 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         es.close();
                         indicesLoading.style.display = "none";
                         indicesBtn.disabled = false;
+                        emailSection.style.display = "block";
                         break;
                 }
             } catch (err) {
@@ -113,6 +128,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (latestDate && indicesDate) {
             indicesDate.textContent = `(${latestDate} 기준)`;
+            _cachedReportDate = latestDate;
+        }
+    }
+
+    if (emailSendBtn) {
+        emailSendBtn.addEventListener("click", sendEmail);
+    }
+
+    async function sendEmail() {
+        const to = emailInput.value.trim();
+        if (!to) {
+            setEmailStatus("이메일 주소를 입력하세요.", "error");
+            return;
+        }
+        if (!_cachedIndicesData) {
+            setEmailStatus("먼저 지수 데이터를 조회하세요.", "error");
+            return;
+        }
+
+        emailSendBtn.disabled = true;
+        setEmailStatus("발송 중...", "sending");
+
+        try {
+            const resp = await fetch("/api/send-email", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to_email:     to,
+                    indices_data: _cachedIndicesData,
+                    news_summary: _cachedNewsSummary,
+                    report_date:  _cachedReportDate,
+                }),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                setEmailStatus(data.message || "발송 완료!", "success");
+            } else {
+                setEmailStatus(data.error || "발송 실패", "error");
+            }
+        } catch (err) {
+            setEmailStatus("서버 오류. 다시 시도해주세요.", "error");
+        } finally {
+            emailSendBtn.disabled = false;
+        }
+    }
+
+    function setEmailStatus(msg, cls) {
+        emailStatus.textContent = msg;
+        emailStatus.className = `email-status ${cls}`;
+        if (cls === "success") {
+            setTimeout(() => { emailStatus.textContent = ""; }, 5000);
         }
     }
 
