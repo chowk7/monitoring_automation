@@ -55,25 +55,111 @@ AVAILABLE_GEMINI_MODELS = [
 ]
 DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
 
-# Default tickers pre-loaded on first run
+# Default tickers pre-loaded on first run (list of dicts: ticker, category, name)
 DEFAULT_TICKERS = [
-    "IFX.DE", "NXPI", "STMPA.PA", "ON", "WOLF", "6723.T",
-    "NVDA", "AMD", "ARM", "QCOM", "INTC", "AVGO", "MRVL", "MU",
-    "000660.KS", "WDC", "SNDK", "285A.T", "2330.TW", "GFS", "0981.HK",
-    "ASML.AS", "CIEN", "NOKIA.HE", "ERIC-B.ST", "CSCO", "068270.KS",
-    "BIIB", "OGN", "MRNA", "PFE", "AMGN", "ROG.SW", "LLY", "NVO",
-    "4523.T", "LONN.SW", "4901.T", "OXB.L", "2269.HK", "2359.HK",
-    "BANB.SW", "PPGN.SW", "GEHC", "PHIA.AS", "SHL.DE",
-    "PACB", "TEM", "GH", "ILMN", "GRAL",
-    "JCI", "TT", "CARR", "LII", "VRT", "ELUX-B.ST", "WHR",
-    "APTV", "AMV0.DE", "TSLA", "MBLY", "VOW.DE", "002594.SZ", "005380.KS",
-    "RBLX", "U", "3659.T",
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "9988.HK", "6758.T", "373220.KS",
-    "GLW", "6324.T",
-    "005930.KS", "005935.KS", "028260.KS", "006400.KS", "018260.KS",
-    "032830.KS", "009150.KS", "000810.KS", "029780.KS", "008770.KS",
-    "012750.KS", "010140.KS", "016360.KS", "028050.KS", "030000.KS",
-    "0126z0.KS", "207940.KS",
+    # 반도체
+    {"ticker": "IFX.DE",     "category": "반도체", "name": "인피니언"},
+    {"ticker": "NXPI",       "category": "반도체", "name": "NXP 세미콘덕터"},
+    {"ticker": "STMPA.PA",   "category": "반도체", "name": "ST마이크로"},
+    {"ticker": "ON",         "category": "반도체", "name": "온세미"},
+    {"ticker": "WOLF",       "category": "반도체", "name": "울프스피드"},
+    {"ticker": "6723.T",     "category": "반도체", "name": "르네사스"},
+    {"ticker": "NVDA",       "category": "반도체", "name": "엔비디아"},
+    {"ticker": "AMD",        "category": "반도체", "name": "AMD"},
+    {"ticker": "ARM",        "category": "반도체", "name": "ARM 홀딩스"},
+    {"ticker": "QCOM",       "category": "반도체", "name": "퀄컴"},
+    {"ticker": "INTC",       "category": "반도체", "name": "인텔"},
+    {"ticker": "AVGO",       "category": "반도체", "name": "브로드컴"},
+    {"ticker": "MRVL",       "category": "반도체", "name": "마벨"},
+    {"ticker": "MU",         "category": "반도체", "name": "마이크론"},
+    {"ticker": "000660.KS",  "category": "반도체", "name": "SK하이닉스"},
+    {"ticker": "WDC",        "category": "반도체", "name": "웨스턴 디지털"},
+    {"ticker": "285A.T",     "category": "반도체", "name": "일본 신규상장주"},
+    {"ticker": "2330.TW",    "category": "반도체", "name": "TSMC"},
+    {"ticker": "GFS",        "category": "반도체", "name": "글로벌파운드리"},
+    {"ticker": "0981.HK",    "category": "반도체", "name": "SMIC"},
+    {"ticker": "ASML.AS",    "category": "반도체", "name": "ASML"},
+    # 네트워크
+    {"ticker": "CIEN",       "category": "네트워크", "name": "시에나"},
+    {"ticker": "NOKIA.HE",   "category": "네트워크", "name": "노키아"},
+    {"ticker": "ERIC-B.ST",  "category": "네트워크", "name": "에릭슨"},
+    {"ticker": "CSCO",       "category": "네트워크", "name": "시스코"},
+    # 바이오
+    {"ticker": "068270.KS",  "category": "바이오", "name": "셀트리온"},
+    {"ticker": "BIIB",       "category": "바이오", "name": "바이오젠"},
+    {"ticker": "OGN",        "category": "바이오", "name": "오가논"},
+    {"ticker": "MRNA",       "category": "바이오", "name": "모더나"},
+    {"ticker": "PFE",        "category": "바이오", "name": "화이자"},
+    {"ticker": "AMGN",       "category": "바이오", "name": "암젠"},
+    {"ticker": "ROG.SW",     "category": "바이오", "name": "로슈"},
+    {"ticker": "LLY",        "category": "바이오", "name": "일라이 릴리"},
+    {"ticker": "NVO",        "category": "바이오", "name": "노보 노디스크"},
+    {"ticker": "4523.T",     "category": "바이오", "name": "에이사이"},
+    {"ticker": "LONN.SW",    "category": "바이오", "name": "론자"},
+    {"ticker": "4901.T",     "category": "바이오", "name": "후지필름"},
+    {"ticker": "OXB.L",      "category": "바이오", "name": "옥스퍼드 바이오메디카"},
+    {"ticker": "2269.HK",    "category": "바이오", "name": "우시 바이오"},
+    {"ticker": "2359.HK",    "category": "바이오", "name": "우시 앱텍"},
+    {"ticker": "BANB.SW",    "category": "바이오", "name": "바실리아"},
+    {"ticker": "PPGN.SW",    "category": "바이오", "name": "폴리펩타이드"},
+    # 의료기기
+    {"ticker": "GEHC",       "category": "의료기기", "name": "GE 헬스케어"},
+    {"ticker": "PHIA.AS",    "category": "의료기기", "name": "필립스"},
+    {"ticker": "SHL.DE",     "category": "의료기기", "name": "지멘스 헬시니어스"},
+    {"ticker": "PACB",       "category": "의료기기", "name": "퍼시픽 바이오사이언스"},
+    {"ticker": "TEM",        "category": "의료기기", "name": "템퍼스 AI"},
+    {"ticker": "GH",         "category": "의료기기", "name": "가드런트 헬스"},
+    {"ticker": "ILMN",       "category": "의료기기", "name": "일루미나"},
+    {"ticker": "GRAL",       "category": "의료기기", "name": "그레일"},
+    # 공조
+    {"ticker": "JCI",        "category": "공조", "name": "존슨 컨트롤즈"},
+    {"ticker": "TT",         "category": "공조", "name": "트레인 테크놀로지"},
+    {"ticker": "CARR",       "category": "공조", "name": "캐리어 글로벌"},
+    {"ticker": "LII",        "category": "공조", "name": "레녹스"},
+    {"ticker": "VRT",        "category": "공조", "name": "버티브 홀딩스"},
+    # 가전
+    {"ticker": "ELUX-B.ST",  "category": "가전", "name": "일렉트로룩스"},
+    {"ticker": "WHR",        "category": "가전", "name": "월풀"},
+    # 전장
+    {"ticker": "APTV",       "category": "전장", "name": "앱티브"},
+    {"ticker": "AMV0.DE",    "category": "전장", "name": "아우토모티브 셀"},
+    {"ticker": "TSLA",       "category": "전장", "name": "테슬라"},
+    {"ticker": "MBLY",       "category": "전장", "name": "모빌아이"},
+    {"ticker": "VOW.DE",     "category": "전장", "name": "폭스바겐"},
+    {"ticker": "002594.SZ",  "category": "전장", "name": "BYD"},
+    {"ticker": "005380.KS",  "category": "전장", "name": "현대차"},
+    # 게임
+    {"ticker": "RBLX",       "category": "게임", "name": "로블록스"},
+    {"ticker": "U",          "category": "게임", "name": "유니티"},
+    {"ticker": "3659.T",     "category": "게임", "name": "넥슨"},
+    # 기타
+    {"ticker": "AAPL",       "category": "기타", "name": "애플"},
+    {"ticker": "MSFT",       "category": "기타", "name": "마이크로소프트"},
+    {"ticker": "AMZN",       "category": "기타", "name": "아마존"},
+    {"ticker": "GOOGL",      "category": "기타", "name": "알파벳 A"},
+    {"ticker": "META",       "category": "기타", "name": "메타"},
+    {"ticker": "9988.HK",    "category": "기타", "name": "알리바바"},
+    {"ticker": "6758.T",     "category": "기타", "name": "소니"},
+    {"ticker": "373220.KS",  "category": "기타", "name": "LG에너지솔루션"},
+    {"ticker": "GLW",        "category": "기타", "name": "코닝"},
+    {"ticker": "6324.T",     "category": "기타", "name": "하모닉 드라이브"},
+    # 삼성
+    {"ticker": "005930.KS",  "category": "삼성", "name": "삼성전자"},
+    {"ticker": "028260.KS",  "category": "삼성", "name": "삼성물산"},
+    {"ticker": "006400.KS",  "category": "삼성", "name": "삼성SDI"},
+    {"ticker": "018260.KS",  "category": "삼성", "name": "삼성에스디에스"},
+    {"ticker": "032830.KS",  "category": "삼성", "name": "삼성생명"},
+    {"ticker": "009150.KS",  "category": "삼성", "name": "삼성전기"},
+    {"ticker": "000810.KS",  "category": "삼성", "name": "삼성화재"},
+    {"ticker": "029780.KS",  "category": "삼성", "name": "삼성카드"},
+    {"ticker": "008770.KS",  "category": "삼성", "name": "호텔신라"},
+    {"ticker": "012750.KS",  "category": "삼성", "name": "에스원"},
+    {"ticker": "010140.KS",  "category": "삼성", "name": "삼성중공업"},
+    {"ticker": "016360.KS",  "category": "삼성", "name": "삼성증권"},
+    {"ticker": "028050.KS",  "category": "삼성", "name": "삼성엔지니어링"},
+    {"ticker": "030000.KS",  "category": "삼성", "name": "제일기획"},
+    {"ticker": "0126Z0.KS",  "category": "삼성", "name": "에피스"},
+    {"ticker": "207940.KS",  "category": "삼성", "name": "삼성바이오로직스"},
 ]
 
 # Default Gemini prompt templates
@@ -169,37 +255,46 @@ def save_settings(settings):
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file.
+    """Load tickers from CSV file. Returns list of dicts: {ticker, category, name}.
 
     Auto-initializes with DEFAULT_TICKERS only on the very first run (file not found).
-    If the file exists (even empty – user explicitly cleared), respects that state.
+    Supports both new 3-column format (ticker,category,name) and legacy 1-column format.
     """
     if not os.path.exists(TICKERS_CSV_FILE):
-        # First run: file has never been created → seed with defaults
-        tickers = list(DEFAULT_TICKERS)
-        save_tickers_to_csv(tickers)
-        logger.info(f"Initialized with {len(tickers)} default tickers.")
-        return tickers
+        save_tickers_to_csv(DEFAULT_TICKERS)
+        logger.info(f"Initialized with {len(DEFAULT_TICKERS)} default tickers.")
+        return list(DEFAULT_TICKERS)
 
-    tickers = []
+    ticker_list = []
     try:
         with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
             reader = csv.reader(f)
             for row in reader:
-                if row and row[0].strip():
-                    tickers.append(row[0].strip().upper())
+                if not row or not row[0].strip():
+                    continue
+                ticker = row[0].strip().upper()
+                category = row[1].strip() if len(row) > 1 else ""
+                name = row[2].strip() if len(row) > 2 else ""
+                ticker_list.append({"ticker": ticker, "category": category, "name": name})
     except Exception as e:
         logger.error(f"Error reading CSV: {e}")
-    return tickers
+    return ticker_list
 
 
-def save_tickers_to_csv(tickers):
-    """Save tickers to CSV file."""
+def save_tickers_to_csv(ticker_list):
+    """Save list of ticker dicts ({ticker, category, name}) to CSV file."""
     try:
         with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            for ticker in tickers:
-                writer.writerow([ticker])
+            for item in ticker_list:
+                if isinstance(item, dict):
+                    writer.writerow([
+                        item.get("ticker", ""),
+                        item.get("category", ""),
+                        item.get("name", ""),
+                    ])
+                else:
+                    writer.writerow([str(item), "", ""])
     except Exception as e:
         logger.error(f"Error writing CSV: {e}")
 
@@ -213,8 +308,8 @@ def index():
 
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
-    tickers = load_tickers_from_csv()
-    return jsonify({"tickers": tickers})
+    ticker_list = load_tickers_from_csv()
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers", methods=["POST"])
@@ -224,44 +319,56 @@ def add_ticker():
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
+    category = data.get("category", "").strip()
+    name = data.get("name", "").strip()
+
+    ticker_list = load_tickers_from_csv()
+    existing = [t["ticker"] for t in ticker_list]
+    if ticker in existing:
         return jsonify({"error": f"{ticker} is already added"}), 400
 
-    tickers.append(ticker)
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    ticker_list.append({"ticker": ticker, "category": category, "name": name})
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers/<ticker>", methods=["DELETE"])
 def delete_ticker(ticker):
     ticker = ticker.upper()
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
-        tickers.remove(ticker)
-        save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    ticker_list = load_tickers_from_csv()
+    ticker_list = [t for t in ticker_list if t["ticker"] != ticker]
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers/bulk", methods=["POST"])
 def bulk_add_tickers():
-    """Add multiple tickers at once (from CSV upload or text input)."""
+    """Add multiple tickers at once. Accepts list of strings or dicts."""
     data = request.get_json()
-    new_tickers = data.get("tickers", [])
+    new_items = data.get("tickers", [])
 
-    if not new_tickers:
+    if not new_items:
         return jsonify({"error": "No tickers provided"}), 400
 
-    tickers = load_tickers_from_csv()
+    ticker_list = load_tickers_from_csv()
+    existing = {t["ticker"] for t in ticker_list}
     added = []
-    for t in new_tickers:
-        t = t.strip().upper()
-        if t and t not in tickers:
-            tickers.append(t)
+    for item in new_items:
+        if isinstance(item, dict):
+            t = item.get("ticker", "").strip().upper()
+            cat = item.get("category", "").strip()
+            nm = item.get("name", "").strip()
+        else:
+            t = str(item).strip().upper()
+            cat = ""
+            nm = ""
+        if t and t not in existing:
+            ticker_list.append({"ticker": t, "category": cat, "name": nm})
+            existing.add(t)
             added.append(t)
 
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers, "added": added, "added_count": len(added)})
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
 
 
 @app.route("/api/tickers/clear", methods=["DELETE"])
@@ -301,29 +408,50 @@ def upload_tickers_csv():
     if content is None:
         return jsonify({"error": "파일 인코딩 오류 (UTF-8 또는 EUC-KR 지원)"}), 400
 
-    # Parse: first column of each row
-    SKIP_HEADERS = {"ticker", "symbol", "종목코드", "티커", "종목명", "name", "code"}
-    new_tickers = []
-    for line in content.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split(",")
-        ticker = parts[0].strip().strip('"').strip("'").upper()
+    # Parse CSV – detect format by header row
+    SKIP_HEADERS = {"ticker", "symbol", "yahoo finance ticker", "종목코드", "티커", "종목명", "name", "code", "category"}
+    lines = [l for l in content.splitlines() if l.strip()]
+    if not lines:
+        return jsonify({"error": "CSV에서 티커를 찾을 수 없습니다."}), 400
+
+    # Detect if header row exists and determine column layout
+    first_parts = [p.strip().strip('"').strip("'").lower() for p in lines[0].split(",")]
+    has_header = first_parts[0] in SKIP_HEADERS
+    # Detect Category,Ticker,Name layout (col0=category, col1=ticker)
+    is_cat_ticker_name = (
+        has_header and len(first_parts) >= 2 and
+        first_parts[0] in {"category", "카테고리"} and
+        first_parts[1] in {"ticker", "yahoo finance ticker", "종목코드", "티커", "symbol"}
+    )
+
+    new_items = []
+    for line in (lines[1:] if has_header else lines):
+        parts = [p.strip().strip('"').strip("'") for p in line.split(",")]
+        if is_cat_ticker_name:
+            cat = parts[0] if len(parts) > 0 else ""
+            ticker = parts[1].upper() if len(parts) > 1 else ""
+            nm = parts[2] if len(parts) > 2 else ""
+        else:
+            ticker = parts[0].upper() if parts else ""
+            cat = ""
+            nm = parts[1] if len(parts) > 1 else ""
         if ticker and ticker.lower() not in SKIP_HEADERS:
-            new_tickers.append(ticker)
+            new_items.append({"ticker": ticker, "category": cat, "name": nm})
 
-    if not new_tickers:
-        return jsonify({"error": "CSV에서 티커를 찾을 수 없습니다. 첫 번째 열에 티커 심볼을 입력해주세요."}), 400
+    if not new_items:
+        return jsonify({"error": "CSV에서 티커를 찾을 수 없습니다."}), 400
 
-    tickers = load_tickers_from_csv()
+    ticker_list = load_tickers_from_csv()
+    existing = {t["ticker"] for t in ticker_list}
     added = []
-    for t in new_tickers:
-        if t not in tickers:
-            tickers.append(t)
-            added.append(t)
+    for item in new_items:
+        if item["ticker"] not in existing:
+            ticker_list.append(item)
+            existing.add(item["ticker"])
+            added.append(item["ticker"])
 
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers, "added": added, "added_count": len(added)})
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
 
 
 # ─── Settings Routes ──────────────────────────────────────────────────────────
@@ -517,9 +645,11 @@ def build_email_html(results, date_str):
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
-    tickers = load_tickers_from_csv()
-    if not tickers:
+    ticker_objects = load_tickers_from_csv()
+    if not ticker_objects:
         return jsonify({"error": "No tickers saved."}), 400
+    tickers = [t["ticker"] for t in ticker_objects]
+    ticker_meta = {t["ticker"]: t for t in ticker_objects}
 
     settings = load_settings()
     model = request.args.get("model", settings.get("gemini_model", DEFAULT_GEMINI_MODEL))
@@ -562,9 +692,11 @@ def analyze_stream():
 
             for ticker in batch:
                 result = fetch_single_ticker(ticker, target_date=target_date)
+                meta = ticker_meta.get(ticker, {})
                 all_stocks_slim[ticker] = {
-                    "name": result.get("name", ticker),
+                    "name": result.get("name") or meta.get("name") or ticker,
                     "change_pct": result.get("change_pct", 0),
+                    "category": meta.get("category", ""),
                 }
                 if "error" in result:
                     all_stocks_slim[ticker]["error"] = result["error"]
@@ -574,8 +706,23 @@ def analyze_stream():
 
             gc.collect()
 
-        # Send all_stocks data
-        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim})}\n\n"
+        # Compute category averages
+        category_stats = {}
+        for tkr, info in all_stocks_slim.items():
+            cat = info.get("category") or "기타"
+            if cat not in category_stats:
+                category_stats[cat] = {"total": 0.0, "count": 0, "tickers": []}
+            category_stats[cat]["tickers"].append(tkr)
+            if not info.get("error"):
+                category_stats[cat]["total"] += info["change_pct"]
+                category_stats[cat]["count"] += 1
+        for cat in category_stats:
+            s = category_stats[cat]
+            s["avg"] = round(s["total"] / s["count"], 2) if s["count"] else 0
+            del s["total"]
+
+        # Send all_stocks data and category stats
+        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim, 'category_stats': category_stats})}\n\n"
 
         log_memory("AFTER FETCH")
 

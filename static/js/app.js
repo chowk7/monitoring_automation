@@ -55,6 +55,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveThresholdBtn = document.getElementById("saveThresholdBtn");
     let currentThreshold = 5.0;
 
+    // Category elements
+    const categoryInput = document.getElementById("categoryInput");
+    const categoryList = document.getElementById("categoryList");
+    const categoryStats = document.getElementById("categoryStats");
+
     // Store analysis results for email sending
     let currentResults = [];
     // Store default prompts for reset
@@ -473,11 +478,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const raw = tickerInput.value.trim();
         if (!raw) return;
 
+        const category = categoryInput ? categoryInput.value.trim() : "";
         // Support comma-separated, space-separated, or newline-separated input
-        const tickers = raw.split(/[,\s\n]+/).map(t => t.trim()).filter(Boolean);
+        const symbols = raw.split(/[,\s\n]+/).map(t => t.trim()).filter(Boolean);
 
-        if (tickers.length > 1) {
-            // Bulk add
+        if (symbols.length > 1) {
+            // Bulk add (assign same category to all)
+            const tickers = symbols.map(s => ({ ticker: s, category, name: "" }));
             try {
                 const resp = await fetch("/api/tickers/bulk", {
                     method: "POST",
@@ -496,13 +503,13 @@ document.addEventListener("DOMContentLoaded", () => {
             } catch (err) {
                 showError("Server error while adding tickers");
             }
-        } else if (tickers.length === 1) {
+        } else if (symbols.length === 1) {
             // Single add
             try {
                 const resp = await fetch("/api/tickers", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ticker: tickers[0] }),
+                    body: JSON.stringify({ ticker: symbols[0], category }),
                 });
                 const data = await resp.json();
                 if (resp.ok) {
@@ -590,20 +597,56 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (tickers.length === 0) {
             tickerList.innerHTML = '<p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>';
+            updateCategoryDatalist(tickers);
             return;
         }
 
-        tickerList.innerHTML = tickers.map(t => `
-            <span class="ticker-tag">
-                ${escapeHtml(t)}
-                <button class="remove-btn" data-ticker="${escapeHtml(t)}" title="Remove">&times;</button>
-            </span>
-        `).join("");
+        // Group by category
+        const groups = {};
+        const noCat = [];
+        for (const t of tickers) {
+            const cat = t.category || "";
+            if (cat) {
+                if (!groups[cat]) groups[cat] = [];
+                groups[cat].push(t);
+            } else {
+                noCat.push(t);
+            }
+        }
 
-        // Bind remove buttons
+        const makeTag = (t) => `
+            <span class="ticker-tag" title="${escapeHtml(t.name || t.ticker)}">
+                ${escapeHtml(t.ticker)}${t.name ? `<span class="ticker-name">${escapeHtml(t.name)}</span>` : ""}
+                <button class="remove-btn" data-ticker="${escapeHtml(t.ticker)}" title="Remove">&times;</button>
+            </span>`;
+
+        let html = "";
+        for (const [cat, items] of Object.entries(groups)) {
+            html += `<div class="ticker-category-group">
+                <span class="ticker-category-label">${escapeHtml(cat)}</span>
+                <div class="ticker-category-items">${items.map(makeTag).join("")}</div>
+            </div>`;
+        }
+        if (noCat.length) {
+            html += `<div class="ticker-category-group">
+                <span class="ticker-category-label" style="color:#5a6a7a;">미분류</span>
+                <div class="ticker-category-items">${noCat.map(makeTag).join("")}</div>
+            </div>`;
+        }
+
+        tickerList.innerHTML = html;
+
         tickerList.querySelectorAll(".remove-btn").forEach(btn => {
             btn.addEventListener("click", () => removeTicker(btn.dataset.ticker));
         });
+
+        updateCategoryDatalist(tickers);
+    }
+
+    function updateCategoryDatalist(tickers) {
+        if (!categoryList) return;
+        const cats = [...new Set(tickers.map(t => t.category).filter(Boolean))];
+        categoryList.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}">`).join("");
     }
 
     // ─── Analysis Functions ───────────────────────────────────────────────
@@ -619,6 +662,7 @@ document.addEventListener("DOMContentLoaded", () => {
         allStocksOverview.innerHTML = "";
         analysisResults.innerHTML = "";
         currentResults = [];
+        if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -659,6 +703,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     case "stocks":
                         resultsSection.style.display = "block";
+                        if (data.category_stats) renderCategoryStats(data.category_stats);
                         renderAllStocksOverview(data.all_stocks);
                         break;
 
@@ -711,29 +756,66 @@ document.addEventListener("DOMContentLoaded", () => {
         };
     }
 
+    function renderCategoryStats(stats) {
+        if (!categoryStats || !stats || Object.keys(stats).length === 0) return;
+
+        const entries = Object.entries(stats).sort((a, b) => Math.abs(b[1].avg) - Math.abs(a[1].avg));
+        let html = '<h3 style="margin-bottom:10px;">카테고리별 평균 등락</h3><div class="category-stats-grid">';
+        for (const [cat, s] of entries) {
+            const cls = s.avg > 0 ? "positive" : s.avg < 0 ? "negative" : "neutral";
+            const sign = s.avg > 0 ? "+" : "";
+            html += `<div class="category-stat-item ${cls}">
+                <span class="cat-name">${escapeHtml(cat)}</span>
+                <span class="cat-avg">${sign}${s.avg.toFixed(2)}%</span>
+                <span class="cat-count">${s.count}종목</span>
+            </div>`;
+        }
+        html += "</div>";
+        categoryStats.innerHTML = html;
+        categoryStats.style.display = "block";
+    }
+
     function renderAllStocksOverview(allStocks) {
         if (!allStocks || Object.keys(allStocks).length === 0) {
             allStocksOverview.innerHTML = "";
             return;
         }
 
-        let overviewHtml = '<h3>전체 종목 변동률</h3><div class="overview-grid">';
-        const entries = Object.entries(allStocks).sort(
-            (a, b) => Math.abs(b[1].change_pct) - Math.abs(a[1].change_pct)
-        );
+        // Group by category
+        const catGroups = {};
+        for (const [ticker, info] of Object.entries(allStocks)) {
+            const cat = info.category || "미분류";
+            if (!catGroups[cat]) catGroups[cat] = [];
+            catGroups[cat].push([ticker, info]);
+        }
+        // Sort items within each group
+        for (const cat of Object.keys(catGroups)) {
+            catGroups[cat].sort((a, b) => Math.abs(b[1].change_pct) - Math.abs(a[1].change_pct));
+        }
 
-        for (const [ticker, info] of entries) {
+        const makeItem = ([ticker, info]) => {
             if (info.error && info.change_pct === 0) {
-                overviewHtml += `<div class="overview-item neutral" title="${escapeHtml(info.error)}">${escapeHtml(ticker)} (오류: ${escapeHtml(info.error)})</div>`;
-                continue;
+                return `<div class="overview-item neutral" title="${escapeHtml(info.error)}">${escapeHtml(info.name || ticker)} (오류)</div>`;
             }
             const cls = info.change_pct > 0 ? "positive" : info.change_pct < 0 ? "negative" : "neutral";
             const filtered = Math.abs(info.change_pct) >= currentThreshold ? " filtered" : "";
             const sign = info.change_pct > 0 ? "+" : "";
-            const displayName = info.name || ticker;
-            overviewHtml += `<div class="overview-item ${cls}${filtered}">${escapeHtml(displayName)} ${sign}${info.change_pct.toFixed(1)}%</div>`;
+            return `<div class="overview-item ${cls}${filtered}">${escapeHtml(info.name || ticker)} ${sign}${info.change_pct.toFixed(1)}%</div>`;
+        };
+
+        let overviewHtml = '<h3>전체 종목 변동률</h3>';
+        const hasCats = Object.keys(catGroups).some(c => c !== "미분류");
+        if (hasCats) {
+            for (const [cat, items] of Object.entries(catGroups)) {
+                overviewHtml += `<div class="overview-category-group">
+                    <span class="overview-category-label">${escapeHtml(cat)}</span>
+                    <div class="overview-grid">${items.map(makeItem).join("")}</div>
+                </div>`;
+            }
+        } else {
+            overviewHtml += `<div class="overview-grid">${Object.entries(catGroups["미분류"] || {}).map(makeItem).join("")}</div>`;
         }
-        overviewHtml += "</div>";
+
         allStocksOverview.innerHTML = overviewHtml;
     }
 
