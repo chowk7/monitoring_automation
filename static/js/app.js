@@ -348,21 +348,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/email/recipients");
             const data = await resp.json();
 
-            // Email config warning
-            const configWarning = document.getElementById("emailConfigWarning");
-            if (configWarning) {
-                configWarning.style.display = data.has_email_config ? "none" : "block";
-                const missingEl = document.getElementById("emailMissingVars");
-                if (missingEl && data.missing_vars && data.missing_vars.length > 0) {
-                    missingEl.textContent = data.missing_vars.join(", ");
-                }
-            }
-
-            // Show/update send email button visibility
-            if (sendEmailBtn) {
-                sendEmailBtn.style.display = data.has_email_config ? "inline-flex" : "none";
-            }
-
             // Default recipients
             const defaultSection = document.getElementById("defaultRecipientsSection");
             const defaultList = document.getElementById("defaultRecipientsList");

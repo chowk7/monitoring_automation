@@ -37,11 +37,11 @@ GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
 # Email configuration
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USER)
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "lub2sky@gmail.com"
+SMTP_PASSWORD = "rasmdixgbznopxel"
+EMAIL_FROM = "lub2sky@gmail.com"
 EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients
 
 # Available Gemini models (for autocomplete suggestions; manual input also allowed)
@@ -527,16 +527,10 @@ def get_email_recipients():
     settings = load_settings()
     default_list = [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()] if EMAIL_TO_DEFAULT else []
     extra_list = settings.get("email_recipients", [])
-    missing = []
-    if not SMTP_USER:
-        missing.append("SMTP_USER")
-    if not SMTP_PASSWORD:
-        missing.append("SMTP_PASSWORD")
     return jsonify({
         "default_recipients": default_list,
         "extra_recipients": extra_list,
-        "has_email_config": bool(SMTP_USER and SMTP_PASSWORD),
-        "missing_vars": missing,
+        "has_email_config": True,
     })
 
 
@@ -573,9 +567,6 @@ def delete_email_recipient(email_addr):
 @app.route("/api/send-email", methods=["POST"])
 def send_email_report():
     """Send analysis results via email."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        return jsonify({"error": "이메일 설정이 구성되지 않았습니다. SMTP_USER, SMTP_PASSWORD 환경변수를 설정해주세요."}), 400
-
     data = request.get_json()
     results = data.get("results", [])
     extra_to = data.get("extra_to", [])  # Additional one-time recipients from request

@@ -13,16 +13,6 @@ services:
         sync: false
       - key: NEWS_API_KEY
         sync: false
-      - key: SMTP_HOST
-        value: smtp.gmail.com
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
       - key: EMAIL_TO
         sync: false
       - key: PORT
