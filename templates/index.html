@@ -41,31 +41,34 @@
             <div class="section-header">
                 <h2>등록된 Tickers</h2>
                 <span id="tickerCount" class="badge">0</span>
+                <button id="tickerListToggle" class="btn btn-toggle">펼치기 ▼</button>
                 <button id="clearAllBtn" class="btn btn-clear">전체 삭제</button>
             </div>
-            <div id="tickerList" class="ticker-list">
-                <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
-            </div>
+            <div id="tickerListBody" style="display:none;">
+                <div id="tickerList" class="ticker-list">
+                    <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
+                </div>
 
-            <!-- Analysis Date -->
-            <div class="date-row">
-                <label for="analysisDate">분석 날짜 (KST)</label>
-                <input type="date" id="analysisDate">
-                <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
-            </div>
+                <!-- Analysis Date -->
+                <div class="date-row">
+                    <label for="analysisDate">분석 날짜 (KST)</label>
+                    <input type="date" id="analysisDate">
+                    <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
+                </div>
 
-            <button id="analyzeBtn" class="btn btn-analyze" disabled>
-                <span class="btn-icon">&#9654;</span> 분석 실행
-            </button>
+                <button id="analyzeBtn" class="btn btn-analyze" disabled>
+                    <span class="btn-icon">&#9654;</span> 분석 실행
+                </button>
+            </div>
         </section>
 
         <!-- Settings Section -->
         <section class="card settings-section">
             <div class="section-header">
                 <h2>분석 설정</h2>
-                <button class="btn btn-toggle" id="settingsToggle">접기 ▲</button>
+                <button class="btn btn-toggle" id="settingsToggle">펼치기 ▼</button>
             </div>
-            <div id="settingsBody">
+            <div id="settingsBody" style="display:none;">
                 <!-- Change Rate Threshold -->
                 <div class="settings-row">
                     <label for="thresholdInput">분석 기준 변동률</label>
@@ -147,9 +150,9 @@
         <section class="card email-section">
             <div class="section-header">
                 <h2>이메일 수신자</h2>
-                <button class="btn btn-toggle" id="emailToggle">접기 ▲</button>
+                <button class="btn btn-toggle" id="emailToggle">펼치기 ▼</button>
             </div>
-            <div id="emailBody">
+            <div id="emailBody" style="display:none;">
                 <!-- Default recipients (from ENV) -->
                 <div id="defaultRecipientsSection" style="display:none;">
                     <p class="recipients-label">기본 수신자 (환경변수 EMAIL_TO)</p>

@@ -46,6 +46,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Stop button
     const stopBtn = document.getElementById("stopBtn");
 
+    // Ticker list toggle
+    const tickerListToggle = document.getElementById("tickerListToggle");
+    const tickerListBody = document.getElementById("tickerListBody");
+
     // Custom query elements
     const customQueryInput = document.getElementById("customQueryInput");
     const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
@@ -97,6 +101,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     analyzeBtn.addEventListener("click", runAnalysis);
+
+    // Ticker list toggle
+    if (tickerListToggle && tickerListBody) {
+        tickerListToggle.addEventListener("click", () => {
+            const collapsed = tickerListBody.style.display === "none";
+            tickerListBody.style.display = collapsed ? "block" : "none";
+            tickerListToggle.textContent = collapsed ? "접기 ▲" : "펼치기 ▼";
+        });
+    }
 
     // Settings toggle
     settingsToggle.addEventListener("click", () => {
