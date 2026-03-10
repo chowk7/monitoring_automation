@@ -46,7 +46,7 @@ EMAIL_FROM = "lub2sky@gmail.com"
 EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients (env)
 DEFAULT_EMAIL_RECIPIENTS = list(dict.fromkeys(
     [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()]
-    + ["lub2sky@gmail.com", "yunseong.cho@samsung.com"]
+    + ["lub2sky@gmail.com", "yunseong.cho@samsung.com", "hn.chung@samsung.com"]
 ))  # hardcoded defaults merged with env
 
 # Available Gemini models (for autocomplete suggestions; manual input also allowed)

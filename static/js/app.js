@@ -80,9 +80,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ─── Init ─────────────────────────────────────────────────────────────
 
-    // Set default analysis date to today in KST
+    // Set default analysis date to yesterday in KST
     if (analysisDate) {
-        analysisDate.value = getKstDateString();
+        analysisDate.value = getKstYesterdayString();
     }
 
     loadTickers();
@@ -195,6 +195,13 @@ document.addEventListener("DOMContentLoaded", () => {
         // KST = UTC + 9h
         const now = new Date();
         const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        return kst.toISOString().slice(0, 10);
+    }
+
+    function getKstYesterdayString() {
+        // Yesterday in KST
+        const now = new Date();
+        const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000);
         return kst.toISOString().slice(0, 10);
     }
 
