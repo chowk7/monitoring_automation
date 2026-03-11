@@ -14,5 +14,18 @@ steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['push', 'gcr.io/$PROJECT_ID/stock-movement-analyzer:latest']
 
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'stock-movement-analyzer'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/stock-movement-analyzer:$COMMIT_SHA'
+      - '--region'
+      - 'asia-northeast3'
+      - '--platform'
+      - 'managed'
+
 options:
   logging: CLOUD_LOGGING_ONLY
