@@ -54,7 +54,7 @@ SMTP_USER     = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
 # Comma-separated default recipient list, e.g. "a@example.com,b@example.com"
-_raw_default  = os.getenv("DEFAULT_RECIPIENTS", "")
+_raw_default  = os.getenv("DEFAULT_RECIPIENTS", "yunseong.cho@samsung.com")
 DEFAULT_RECIPIENTS = [e.strip() for e in _raw_default.split(",") if e.strip()]
 
 # Naver Search API
@@ -528,7 +528,7 @@ def fetch_naver_news(region, display=5):
 
 
 def fetch_naver_news_for_ticker(ticker, name, display=5):
-    """Fetch recent Naver news headlines for a specific stock ticker."""
+    """Fetch recent Naver news + web search headlines for a specific stock ticker."""
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         return []
 
@@ -537,9 +537,9 @@ def fetch_naver_news_for_ticker(ticker, name, display=5):
         "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
     }
     headlines = []
-    # Build queries: company name first, then ticker symbol as fallback
     queries = [name, ticker] if name and name != ticker else [ticker]
 
+    # Naver News API
     for query in queries[:2]:
         try:
             resp = requests.get(
@@ -556,7 +556,24 @@ def fetch_naver_news_for_ticker(ticker, name, display=5):
         except Exception as e:
             logger.warning(f"Naver news fetch failed ({query}): {e}")
 
-    return headlines[:display]
+    # Naver Web Search API (추가 맥락)
+    for query in queries[:1]:
+        try:
+            resp = requests.get(
+                "https://openapi.naver.com/v1/search/webkr.json",
+                headers=headers,
+                params={"query": query, "display": 3, "sort": "date"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("items", []):
+                    title = item.get("title", "").replace("<b>", "").replace("</b>", "")
+                    if title and title not in headlines:
+                        headlines.append(title)
+        except Exception as e:
+            logger.warning(f"Naver web search failed ({query}): {e}")
+
+    return headlines[:display + 3]
 
 
 def get_indices_news_summary(indices_data):

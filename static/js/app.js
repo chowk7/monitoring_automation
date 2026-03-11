@@ -158,12 +158,13 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderRecipientTags() {
         if (!recipientTags) return;
         recipientTags.innerHTML = "";
-        recipients.forEach((email, idx) => {
+        recipients.forEach((email) => {
             const tag = document.createElement("span");
             tag.className = "recipient-tag";
-            tag.innerHTML = `${email}<button class="recipient-tag-remove" title="제외" data-idx="${idx}">&times;</button>`;
+            tag.innerHTML = `${email}<button class="recipient-tag-remove" title="제외">&times;</button>`;
             tag.querySelector("button").addEventListener("click", () => {
-                recipients.splice(idx, 1);
+                const i = recipients.indexOf(email);
+                if (i !== -1) recipients.splice(i, 1);
                 renderRecipientTags();
             });
             recipientTags.appendChild(tag);
