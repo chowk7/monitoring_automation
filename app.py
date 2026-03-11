@@ -42,6 +42,10 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 _raw_default  = os.getenv("DEFAULT_RECIPIENTS", "")
 DEFAULT_RECIPIENTS = [e.strip() for e in _raw_default.split(",") if e.strip()]
 
+# Naver Search API
+NAVER_CLIENT_ID     = os.getenv("NAVER_CLIENT_ID", "")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
@@ -456,6 +460,44 @@ def fetch_index_data(symbol, name, target_date=None):
         return {"symbol": symbol, "name": name, "error": str(e)}
 
 
+NAVER_NEWS_QUERIES = {
+    "미국": ["미국증시", "뉴욕증시", "나스닥", "다우존스"],
+    "아시아": ["코스피", "코스닥", "일본증시", "중국증시"],
+    "유럽": ["유럽증시", "영국증시"],
+}
+
+
+def fetch_naver_news(region, display=5):
+    """Fetch recent news headlines from Naver Search API for a given region."""
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        return []
+
+    headers = {
+        "X-Naver-Client-Id": NAVER_CLIENT_ID,
+        "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+    }
+    headlines = []
+    queries = NAVER_NEWS_QUERIES.get(region, [])
+
+    for query in queries[:2]:  # 쿼리 2개씩, 각 display개
+        try:
+            resp = requests.get(
+                "https://openapi.naver.com/v1/search/news.json",
+                headers=headers,
+                params={"query": query, "display": display, "sort": "date"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                items = resp.json().get("items", [])
+                for item in items:
+                    title = item.get("title", "").replace("<b>", "").replace("</b>", "")
+                    headlines.append(title)
+        except Exception as e:
+            logger.warning(f"Naver news fetch failed ({query}): {e}")
+
+    return headlines
+
+
 def get_indices_news_summary(indices_data):
     """Use Gemini to generate news & market analysis for global indices."""
     if not GEMINI_API_KEY:
@@ -485,17 +527,30 @@ def get_indices_news_summary(indices_data):
     date_info = " | ".join(f"{r}: {d}" for r, d in region_dates.items())
     today = date_info if date_info else datetime.now().strftime("%Y-%m-%d")
 
+    # Fetch real headlines from Naver News API per region
+    news_lines = []
+    for region in indices_data:
+        headlines = fetch_naver_news(region)
+        if headlines:
+            news_lines.append(f"\n[{region} 실시간 뉴스 헤드라인]")
+            for h in headlines:
+                news_lines.append(f"  - {h}")
+    news_context = "\n".join(news_lines) if news_lines else "  (네이버 뉴스 API 미설정)"
+
     prompt = f"""당신은 글로벌 금융 시장 전문 애널리스트입니다.
 각 지역별 현지 기준 날짜: {today}
 
 아래는 주요 글로벌 주가 지수 현황입니다 (각 수치는 해당 거래소의 현지 날짜 기준):
 {context}
 
-위 지수들의 움직임을 분석하고, 각 지역별 주요 이슈와 뉴스를 한글로 정리해주세요.
+아래는 네이버에서 수집한 각 지역 실시간 뉴스 헤드라인입니다. 분석 시 반드시 참고하세요:
+{news_context}
+
+위 지수 데이터와 실제 뉴스 헤드라인을 바탕으로 각 지역별 주요 이슈를 한글로 정리해주세요.
 
 출력 형식 (마크다운):
 ## 미국 시장
-- 핵심 이슈 2-3가지 (지수 움직임 원인, 최신 경제 이벤트/정책/실적 기반)
+- 핵심 이슈 2-3가지 (뉴스 헤드라인 근거 포함)
 
 ## 아시아 시장
 - 핵심 이슈 2-3가지
@@ -506,7 +561,7 @@ def get_indices_news_summary(indices_data):
 ## 종합 시장 분위기
 1-2문장으로 전체 시장 분위기 요약.
 
-각 이슈는 구체적 근거(연준 정책, 환율, 무역, 실적 시즌 등)를 포함하고 간결하게 작성하세요.
+각 이슈는 실제 뉴스 근거를 포함하고 간결하게 작성하세요.
 """
 
     try:
