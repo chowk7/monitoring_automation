@@ -645,13 +645,24 @@ def build_email_html(indices_data, news_summary, report_date):
 
     # Convert markdown news to simple HTML paragraphs
     news_html = ""
-    for line in news_summary.split("\n"):
+    section_count = 0
+    _clean_summary = news_summary.strip()
+    # Strip code fences if Gemini wraps output in ```markdown ... ```
+    import re as _re
+    _clean_summary = _re.sub(r'^```[a-z]*\n?', '', _clean_summary, flags=_re.IGNORECASE)
+    _clean_summary = _re.sub(r'\n?```$', '', _clean_summary)
+    for line in _clean_summary.split("\n"):
         t = line.strip()
         if not t:
             continue
-        if t.startswith("## "):
-            news_html += f'<h3 style="color:#818cf8;font-size:0.95rem;margin:16px 0 6px;padding-left:10px;border-left:3px solid #6366f1;">{t[3:]}</h3>'
-        elif t.startswith("- "):
+        if t.startswith("## ") or t.startswith("### "):
+            text = t[4:] if t.startswith("### ") else t[3:]
+            top_margin = "24px" if section_count > 0 else "0"
+            if section_count > 0:
+                news_html += '<hr style="border:none;border-top:1px solid #2a3a4a;margin:16px 0 0;">'
+            news_html += f'<h3 style="color:#818cf8;font-size:0.95rem;margin:{top_margin} 0 6px;padding-left:10px;border-left:3px solid #6366f1;">{text}</h3>'
+            section_count += 1
+        elif t.startswith("- ") or t.startswith("* "):
             news_html += f'<p style="color:#94a3b8;font-size:0.88rem;margin:4px 0 4px 14px;">• {t[2:]}</p>'
         else:
             news_html += f'<p style="color:#b0c4de;font-size:0.88rem;margin:6px 0;">{t}</p>'

@@ -241,10 +241,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderNews(summary) {
-        // Convert basic markdown (## heading, - list, plain text) to HTML
-        const lines = summary.split("\n");
+        // Convert basic markdown (## / ### heading, - list, plain text) to HTML
+        // Strip surrounding code fences if Gemini wraps output in ```markdown ... ```
+        const stripped = summary.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "");
+        const lines = stripped.split("\n");
         let html = "";
         let inUl = false;
+        let sectionCount = 0;
 
         for (const line of lines) {
             const trimmed = line.trim();
@@ -252,12 +255,21 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (inUl) { html += "</ul>"; inUl = false; }
                 continue;
             }
-            if (trimmed.startsWith("## ")) {
+            if (trimmed.startsWith("## ") || trimmed.startsWith("### ")) {
                 if (inUl) { html += "</ul>"; inUl = false; }
-                html += `<h2>${escapeHtml(trimmed.slice(3))}</h2>`;
-            } else if (trimmed.startsWith("- ")) {
+                const text = trimmed.startsWith("### ") ? trimmed.slice(4) : trimmed.slice(3);
+                // Add a visual divider between sections (not before the first one)
+                if (sectionCount > 0) {
+                    html += `<hr class="news-section-divider">`;
+                }
+                html += `<h2>${escapeHtml(text)}</h2>`;
+                sectionCount++;
+            } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
                 if (!inUl) { html += "<ul>"; inUl = true; }
                 html += `<li>${escapeHtml(trimmed.slice(2))}</li>`;
+            } else if (/^\d+\.\s/.test(trimmed)) {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                html += `<p>${escapeHtml(trimmed)}</p>`;
             } else {
                 if (inUl) { html += "</ul>"; inUl = false; }
                 html += `<p>${escapeHtml(trimmed)}</p>`;
