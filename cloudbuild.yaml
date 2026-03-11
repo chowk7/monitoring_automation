@@ -1,0 +1,12 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_IMAGE_NAME', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_IMAGE_NAME']
+
+substitutions:
+  _IMAGE_NAME: 'gcr.io/$PROJECT_ID/stock-movement-analyzer:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
