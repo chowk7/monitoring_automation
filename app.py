@@ -29,6 +29,21 @@ logger = logging.getLogger(__name__)
 # CSV file for ticker storage
 TICKERS_CSV_FILE = "tickers.csv"
 
+# Default ticker list – loaded automatically when tickers.csv is absent or empty
+DEFAULT_TICKERS = [
+    "IFX.DE", "NXPI", "STMPA.PA", "ON", "WOLF", "6723.T", "NVDA", "AMD", "ARM", "QCOM",
+    "INTC", "AVGO", "MRVL", "MU", "000660.KS", "WDC", "SNDK", "285A.T", "2330.TW", "GFS",
+    "0981.HK", "ASML.AS", "CIEN", "NOKIA.HE", "ERIC-B.ST", "CSCO", "068270.KS", "BIIB",
+    "OGN", "MRNA", "PFE", "AMGN", "ROG.SW", "LLY", "NVO", "4523.T", "LONN.SW", "4901.T",
+    "OXB.L", "2269.HK", "2359.HK", "BANB.SW", "PPGN.SW", "GEHC", "PHIA.AS", "SHL.DE",
+    "PACB", "TEM", "GH", "ILMN", "GRAL", "JCI", "TT", "CARR", "LII", "VRT", "ELUX-B.ST",
+    "WHR", "APTV", "AMV0.DE", "TSLA", "MBLY", "VOW.DE", "002594.SZ", "005380.KS", "RBLX",
+    "U", "3659.T", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "9988.HK", "6758.T",
+    "373220.KS", "GLW", "6324.T", "005930.KS", "028260.KS", "006400.KS", "018260.KS",
+    "032830.KS", "009150.KS", "000810.KS", "029780.KS", "008770.KS", "012750.KS",
+    "010140.KS", "016360.KS", "028050.KS", "030000.KS", "0126Z0.KS", "207940.KS",
+]
+
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
@@ -72,7 +87,7 @@ def get_gemini_client():
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file."""
+    """Load tickers from CSV file. Falls back to DEFAULT_TICKERS when file is absent or empty."""
     tickers = []
     if os.path.exists(TICKERS_CSV_FILE):
         try:
@@ -83,6 +98,10 @@ def load_tickers_from_csv():
                         tickers.append(row[0].strip().upper())
         except Exception as e:
             logger.error(f"Error reading CSV: {e}")
+    if not tickers:
+        tickers = list(DEFAULT_TICKERS)
+        save_tickers_to_csv(tickers)
+        logger.info(f"Initialized tickers.csv with {len(tickers)} default tickers.")
     return tickers
 
 
