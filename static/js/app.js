@@ -58,7 +58,6 @@ document.addEventListener("DOMContentLoaded", () => {
         indicesLoading.style.display = "block";
         indicesLoadingText.textContent = "데이터 수집 중...";
         newsSummaryText.innerHTML = "";
-        emailSection.style.display = "none";
         emailStatus.textContent = "";
         [usIndices, asiaIndices, euIndices].forEach(el => { el.innerHTML = ""; });
 
@@ -94,7 +93,8 @@ document.addEventListener("DOMContentLoaded", () => {
                         es.close();
                         indicesLoading.style.display = "none";
                         indicesBtn.disabled = false;
-                        emailSection.style.display = "block";
+                        // 수신자가 있으면 자동 발송
+                        if (recipients.length > 0) sendEmail();
                         break;
                 }
             } catch (err) {

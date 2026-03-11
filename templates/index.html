@@ -54,18 +54,19 @@
             </div>
 
             <!-- Email Send UI -->
-            <div id="emailSection" style="display:none;">
+            <div id="emailSection">
                 <div class="news-divider"></div>
                 <div class="email-header">
                     <span class="email-icon">&#9993;</span>
                     <span class="email-label">수신자</span>
+                    <span class="email-auto-hint">분석 완료 시 자동 발송</span>
                 </div>
                 <div id="recipientTags" class="recipient-tags"></div>
                 <div class="email-row">
                     <input type="email" id="emailInput" class="email-input"
                            placeholder="이메일 입력 후 Enter 또는 추가" autocomplete="email">
                     <button id="emailAddBtn" class="btn btn-email-add">추가</button>
-                    <button id="emailSendBtn" class="btn btn-email">발송</button>
+                    <button id="emailSendBtn" class="btn btn-email">지금 발송</button>
                     <span id="emailStatus" class="email-status"></span>
                 </div>
             </div>

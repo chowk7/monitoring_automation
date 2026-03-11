@@ -675,6 +675,12 @@ header h1 {
     letter-spacing: 0.05em;
 }
 
+.email-auto-hint {
+    font-size: 0.75rem;
+    color: #4a5a6a;
+    margin-left: 6px;
+}
+
 .recipient-tags {
     display: flex;
     flex-wrap: wrap;
