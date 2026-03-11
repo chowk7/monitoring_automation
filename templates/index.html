@@ -13,6 +13,65 @@
             <p class="subtitle">전일 주가 변동 원인 분석기</p>
         </header>
 
+        <!-- Global Indices Section -->
+        <section class="card indices-section">
+            <div class="section-header">
+                <h2>글로벌 주요 지수</h2>
+                <span id="indicesDate" class="indices-date"></span>
+                <input type="date" id="indicesDatePicker" class="date-picker">
+                <button id="indicesBtn" class="btn btn-indices">조회</button>
+            </div>
+
+            <!-- Loading -->
+            <div id="indicesLoading" style="display:none;">
+                <div class="spinner small-spinner"></div>
+                <p id="indicesLoadingText" class="indices-loading-text">데이터 수집 중...</p>
+            </div>
+
+            <!-- Index Tables -->
+            <div id="indicesData" style="display:none;">
+                <div class="indices-regions">
+                    <div class="indices-region">
+                        <h3 class="region-title us-title">🇺🇸 미국</h3>
+                        <div id="usIndices" class="index-list"></div>
+                    </div>
+                    <div class="indices-region">
+                        <h3 class="region-title asia-title">🌏 아시아</h3>
+                        <div id="asiaIndices" class="index-list"></div>
+                    </div>
+                    <div class="indices-region">
+                        <h3 class="region-title eu-title">🇪🇺 유럽</h3>
+                        <div id="euIndices" class="index-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- News Summary -->
+            <div id="indicesNews" style="display:none;">
+                <div class="news-divider"></div>
+                <h3 class="news-title">뉴스 &amp; 시장 분석 <span class="news-badge">Gemini 2.5 Pro</span></h3>
+                <div id="newsSummaryText" class="news-content"></div>
+            </div>
+
+            <!-- Email Send UI -->
+            <div id="emailSection">
+                <div class="news-divider"></div>
+                <div class="email-header">
+                    <span class="email-icon">&#9993;</span>
+                    <span class="email-label">수신자</span>
+                    <span class="email-auto-hint">분석 완료 시 자동 발송</span>
+                </div>
+                <div id="recipientTags" class="recipient-tags"></div>
+                <div class="email-row">
+                    <input type="email" id="emailInput" class="email-input"
+                           placeholder="이메일 입력 후 Enter 또는 추가" autocomplete="email">
+                    <button id="emailAddBtn" class="btn btn-email-add">추가</button>
+                    <button id="emailSendBtn" class="btn btn-email">지금 발송</button>
+                    <span id="emailStatus" class="email-status"></span>
+                </div>
+            </div>
+        </section>
+
         <!-- Ticker Input Section -->
         <section class="card ticker-input-section">
             <h2>Ticker 등록</h2>
@@ -65,6 +124,9 @@
         </section>
     </div>
 
+    <script>
+        window.DEFAULT_RECIPIENTS = {{ default_recipients | tojson }};
+    </script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

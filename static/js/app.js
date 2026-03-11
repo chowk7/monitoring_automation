@@ -1,3 +1,276 @@
+// ─── Shared Utilities ─────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ─── Global Indices ───────────────────────────────────────────────────────────
+
+document.addEventListener("DOMContentLoaded", () => {
+    const indicesBtn        = document.getElementById("indicesBtn");
+    const indicesLoading    = document.getElementById("indicesLoading");
+    const indicesLoadingText= document.getElementById("indicesLoadingText");
+    const indicesData       = document.getElementById("indicesData");
+    const indicesNews       = document.getElementById("indicesNews");
+    const indicesDate       = document.getElementById("indicesDate");
+    const newsSummaryText   = document.getElementById("newsSummaryText");
+    const usIndices         = document.getElementById("usIndices");
+    const asiaIndices       = document.getElementById("asiaIndices");
+    const euIndices         = document.getElementById("euIndices");
+
+    const emailSection   = document.getElementById("emailSection");
+    const emailInput     = document.getElementById("emailInput");
+    const emailAddBtn    = document.getElementById("emailAddBtn");
+    const emailSendBtn   = document.getElementById("emailSendBtn");
+    const emailStatus    = document.getElementById("emailStatus");
+    const recipientTags  = document.getElementById("recipientTags");
+
+    // Default recipients from server env (DEFAULT_RECIPIENTS)
+    let recipients = Array.isArray(window.DEFAULT_RECIPIENTS) ? [...window.DEFAULT_RECIPIENTS] : [];
+    renderRecipientTags();
+
+    const datePicker        = document.getElementById("indicesDatePicker");
+    const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
+
+    // Default date picker to today (local browser date)
+    if (datePicker) {
+        const today = new Date();
+        datePicker.value = today.toISOString().slice(0, 10);
+        // Prevent future dates
+        datePicker.max = today.toISOString().slice(0, 10);
+    }
+
+    // Cached data for email payload
+    let _cachedIndicesData = null;
+    let _cachedNewsSummary = "";
+    let _cachedReportDate  = "";
+
+    if (indicesBtn) {
+        indicesBtn.addEventListener("click", fetchIndices);
+    }
+
+    function fetchIndices() {
+        indicesBtn.disabled = true;
+        indicesData.style.display = "none";
+        indicesNews.style.display = "none";
+        indicesLoading.style.display = "block";
+        indicesLoadingText.textContent = "데이터 수집 중...";
+        newsSummaryText.innerHTML = "";
+        emailStatus.textContent = "";
+        [usIndices, asiaIndices, euIndices].forEach(el => { el.innerHTML = ""; });
+
+        const selectedDate = datePicker ? datePicker.value : "";
+        const streamUrl = selectedDate
+            ? `/api/indices/stream?date=${encodeURIComponent(selectedDate)}`
+            : "/api/indices/stream";
+        const es = new EventSource(streamUrl);
+
+        es.onmessage = function(event) {
+            try {
+                const msg = JSON.parse(event.data);
+
+                switch (msg.type) {
+                    case "progress":
+                        indicesLoadingText.textContent = msg.message;
+                        break;
+
+                    case "indices":
+                        _cachedIndicesData = msg.data;
+                        renderIndices(msg.data);
+                        indicesLoading.style.display = "none";
+                        indicesData.style.display = "block";
+                        break;
+
+                    case "news":
+                        _cachedNewsSummary = msg.summary;
+                        renderNews(msg.summary);
+                        indicesNews.style.display = "block";
+                        break;
+
+                    case "done":
+                        es.close();
+                        indicesLoading.style.display = "none";
+                        indicesBtn.disabled = false;
+                        // 수신자가 있으면 자동 발송
+                        if (recipients.length > 0) sendEmail();
+                        break;
+                }
+            } catch (err) {
+                console.error("Indices SSE parse error:", err);
+            }
+        };
+
+        es.onerror = function() {
+            es.close();
+            indicesLoading.style.display = "none";
+            indicesBtn.disabled = false;
+            indicesLoadingText.textContent = "오류 발생. 다시 시도해주세요.";
+            indicesLoading.style.display = "block";
+        };
+    }
+
+    function renderIndices(data) {
+        // Collect the representative local date per region (first valid index)
+        const regionDates = {};
+
+        for (const [region, indices] of Object.entries(data)) {
+            const container = REGION_CONTAINERS[region];
+            if (!container) continue;
+
+            container.innerHTML = "";
+            for (const idx of indices) {
+                if (idx.error) {
+                    const el = document.createElement("div");
+                    el.className = "index-error";
+                    el.textContent = `${escapeHtml(idx.name)}: 오류`;
+                    container.appendChild(el);
+                    continue;
+                }
+
+                if (idx.date && !(region in regionDates)) regionDates[region] = idx.date;
+
+                const sign = idx.change_pct >= 0 ? "+" : "";
+                const cls  = idx.change_pct > 0 ? "positive" : idx.change_pct < 0 ? "negative" : "neutral";
+                const val  = idx.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                const row = document.createElement("div");
+                row.className = "index-row";
+                row.innerHTML = `
+                    <span class="index-name" title="${escapeHtml(idx.name)}">${escapeHtml(idx.name)}</span>
+                    <span class="index-value">${val}</span>
+                    <span class="index-change ${cls}">${sign}${idx.change_pct.toFixed(2)}%</span>
+                `;
+                container.appendChild(row);
+            }
+        }
+
+        if (Object.keys(regionDates).length && indicesDate) {
+            const label = Object.entries(regionDates)
+                .map(([r, d]) => `${r} ${d}`)
+                .join(" | ");
+            indicesDate.textContent = `(현지 기준: ${label})`;
+            _cachedReportDate = Object.values(regionDates).sort().at(-1); // latest for email subject
+        }
+    }
+
+    function renderRecipientTags() {
+        if (!recipientTags) return;
+        recipientTags.innerHTML = "";
+        recipients.forEach((email, idx) => {
+            const tag = document.createElement("span");
+            tag.className = "recipient-tag";
+            tag.innerHTML = `${email}<button class="recipient-tag-remove" title="제외" data-idx="${idx}">&times;</button>`;
+            tag.querySelector("button").addEventListener("click", () => {
+                recipients.splice(idx, 1);
+                renderRecipientTags();
+            });
+            recipientTags.appendChild(tag);
+        });
+    }
+
+    function addRecipient() {
+        const val = emailInput.value.trim();
+        if (!val) return;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+            setEmailStatus("올바른 이메일 형식이 아닙니다.", "error");
+            return;
+        }
+        if (recipients.includes(val)) {
+            setEmailStatus("이미 추가된 주소입니다.", "error");
+            return;
+        }
+        recipients.push(val);
+        emailInput.value = "";
+        emailStatus.textContent = "";
+        renderRecipientTags();
+    }
+
+    if (emailAddBtn) emailAddBtn.addEventListener("click", addRecipient);
+    if (emailInput) {
+        emailInput.addEventListener("keydown", e => {
+            if (e.key === "Enter") { e.preventDefault(); addRecipient(); }
+        });
+    }
+    if (emailSendBtn) emailSendBtn.addEventListener("click", sendEmail);
+
+    async function sendEmail() {
+        if (recipients.length === 0) {
+            setEmailStatus("수신자를 추가해주세요.", "error");
+            return;
+        }
+        if (!_cachedIndicesData) {
+            setEmailStatus("먼저 지수 데이터를 조회하세요.", "error");
+            return;
+        }
+
+        emailSendBtn.disabled = true;
+        setEmailStatus("발송 중...", "sending");
+
+        try {
+            const resp = await fetch("/api/send-email", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    to_emails:    recipients,
+                    indices_data: _cachedIndicesData,
+                    news_summary: _cachedNewsSummary,
+                    report_date:  _cachedReportDate,
+                }),
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                setEmailStatus(data.message || "발송 완료!", "success");
+            } else {
+                setEmailStatus(data.error || "발송 실패", "error");
+            }
+        } catch (err) {
+            setEmailStatus("서버 오류. 다시 시도해주세요.", "error");
+        } finally {
+            emailSendBtn.disabled = false;
+        }
+    }
+
+    function setEmailStatus(msg, cls) {
+        emailStatus.textContent = msg;
+        emailStatus.className = `email-status ${cls}`;
+        if (cls === "success") {
+            setTimeout(() => { emailStatus.textContent = ""; }, 5000);
+        }
+    }
+
+    function renderNews(summary) {
+        // Convert basic markdown (## heading, - list, plain text) to HTML
+        const lines = summary.split("\n");
+        let html = "";
+        let inUl = false;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                continue;
+            }
+            if (trimmed.startsWith("## ")) {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                html += `<h2>${escapeHtml(trimmed.slice(3))}</h2>`;
+            } else if (trimmed.startsWith("- ")) {
+                if (!inUl) { html += "<ul>"; inUl = true; }
+                html += `<li>${escapeHtml(trimmed.slice(2))}</li>`;
+            } else {
+                if (inUl) { html += "</ul>"; inUl = false; }
+                html += `<p>${escapeHtml(trimmed)}</p>`;
+            }
+        }
+        if (inUl) html += "</ul>";
+
+        newsSummaryText.innerHTML = html;
+    }
+});
+
+// ─── Stock Ticker Analyzer ────────────────────────────────────────────────────
+
 document.addEventListener("DOMContentLoaded", () => {
     const tickerInput = document.getElementById("tickerInput");
     const addBtn = document.getElementById("addBtn");
@@ -312,9 +585,4 @@ document.addEventListener("DOMContentLoaded", () => {
         errorSection.style.display = "none";
     }
 
-    function escapeHtml(str) {
-        const div = document.createElement("div");
-        div.textContent = str;
-        return div.innerHTML;
-    }
 });
