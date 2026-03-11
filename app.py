@@ -38,6 +38,10 @@ SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER     = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 
+# Comma-separated default recipient list, e.g. "a@example.com,b@example.com"
+_raw_default  = os.getenv("DEFAULT_RECIPIENTS", "")
+DEFAULT_RECIPIENTS = [e.strip() for e in _raw_default.split(",") if e.strip()]
+
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
@@ -93,7 +97,7 @@ def save_tickers_to_csv(tickers):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", default_recipients=DEFAULT_RECIPIENTS)
 
 
 @app.route("/api/tickers", methods=["GET"])

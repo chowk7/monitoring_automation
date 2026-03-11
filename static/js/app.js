@@ -27,9 +27,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const emailStatus    = document.getElementById("emailStatus");
     const recipientTags  = document.getElementById("recipientTags");
 
-    // Default recipients (lub2sky@gmail.com 제외)
-    const DEFAULT_RECIPIENTS = [];
-    let recipients = [...DEFAULT_RECIPIENTS];
+    // Default recipients from server env (DEFAULT_RECIPIENTS)
+    let recipients = Array.isArray(window.DEFAULT_RECIPIENTS) ? [...window.DEFAULT_RECIPIENTS] : [];
+    renderRecipientTags();
 
     const datePicker        = document.getElementById("indicesDatePicker");
     const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
