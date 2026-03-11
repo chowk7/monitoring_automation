@@ -378,11 +378,18 @@ GLOBAL_INDICES = {
 }
 
 
-def fetch_index_data(symbol, name):
-    """Fetch a single index's price data from Yahoo Finance."""
+def fetch_index_data(symbol, name, target_date=None):
+    """Fetch a single index's price data from Yahoo Finance.
+
+    target_date: 'YYYY-MM-DD' string.  When given, find the candle whose
+    exchange-local date matches target_date and calculate change vs the
+    previous trading day.  When None, use the most recent candle.
+    """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        params = {"range": "5d", "interval": "1d"}
+        # Fetch enough history to cover a target date + prior trading day.
+        # For a specific date we use a 10-day window; otherwise 5d suffices.
+        params = {"range": "10d" if target_date else "5d", "interval": "1d"}
         resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
 
         if resp.status_code != 200:
@@ -390,27 +397,47 @@ def fetch_index_data(symbol, name):
 
         data = resp.json()
         result = data["chart"]["result"][0]
+        meta   = result["meta"]
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
-        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
-
-        if len(valid) < 2:
-            return {"symbol": symbol, "name": name, "error": "데이터 부족"}
-
-        prev_close = valid[-2][1]
-        last_close = valid[-1][1]
-        change = last_close - prev_close
-        change_pct = (change / prev_close) * 100
-
-        # Convert timestamp to exchange's local date
+        # Resolve exchange timezone
         tz_name = meta.get("exchangeTimezoneName", "UTC")
         try:
             tz = ZoneInfo(tz_name)
         except ZoneInfoNotFoundError:
             tz = timezone.utc
-        last_dt = datetime.fromtimestamp(valid[-1][0], tz=tz)
-        last_date = last_dt.strftime("%Y-%m-%d")
+
+        # Build list of (local_date_str, ts, close) for valid candles
+        valid = []
+        for ts, c in zip(timestamps, closes):
+            if c is None:
+                continue
+            local_date = datetime.fromtimestamp(ts, tz=tz).strftime("%Y-%m-%d")
+            valid.append((local_date, ts, c))
+
+        if len(valid) < 2:
+            return {"symbol": symbol, "name": name, "error": "데이터 부족"}
+
+        if target_date:
+            # Find the index of the candle matching target_date (exchange local)
+            target_idx = next(
+                (i for i, (d, _, _) in enumerate(valid) if d == target_date), None
+            )
+            if target_idx is None:
+                return {"symbol": symbol, "name": name,
+                        "error": f"현지 {target_date} 거래 데이터 없음 (휴장일 가능성)"}
+            if target_idx == 0:
+                return {"symbol": symbol, "name": name,
+                        "error": f"현지 {target_date} 이전 거래일 데이터 부족"}
+            last_date, _, last_close   = valid[target_idx]
+            _,         _, prev_close   = valid[target_idx - 1]
+        else:
+            last_date, _, last_close = valid[-1]
+            _,         _, prev_close = valid[-2]
+
+        change = last_close - prev_close
+        change_pct = (change / prev_close) * 100
 
         return {
             "symbol": symbol,
@@ -491,15 +518,17 @@ def get_indices_news_summary(indices_data):
 @app.route("/api/indices/stream", methods=["GET"])
 def indices_stream():
     """SSE endpoint: fetch global index prices then Gemini news summary."""
+    target_date = request.args.get("date") or None  # 'YYYY-MM-DD' or None
 
     def generate():
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 데이터 수집 중...'})}\n\n"
+        label = f"{target_date} 현지 기준 " if target_date else ""
+        yield f"data: {json.dumps({'type': 'progress', 'message': f'{label}글로벌 지수 데이터 수집 중...'})}\n\n"
 
         all_indices_data = {}
         for region, indices in GLOBAL_INDICES.items():
             region_data = []
             for idx in indices:
-                result = fetch_index_data(idx["symbol"], idx["name"])
+                result = fetch_index_data(idx["symbol"], idx["name"], target_date)
                 region_data.append(result)
             all_indices_data[region] = region_data
 

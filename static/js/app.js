@@ -31,7 +31,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const DEFAULT_RECIPIENTS = [];
     let recipients = [...DEFAULT_RECIPIENTS];
 
+    const datePicker        = document.getElementById("indicesDatePicker");
     const REGION_CONTAINERS = { "미국": usIndices, "아시아": asiaIndices, "유럽": euIndices };
+
+    // Default date picker to today (local browser date)
+    if (datePicker) {
+        const today = new Date();
+        datePicker.value = today.toISOString().slice(0, 10);
+        // Prevent future dates
+        datePicker.max = today.toISOString().slice(0, 10);
+    }
 
     // Cached data for email payload
     let _cachedIndicesData = null;
@@ -53,7 +62,11 @@ document.addEventListener("DOMContentLoaded", () => {
         emailStatus.textContent = "";
         [usIndices, asiaIndices, euIndices].forEach(el => { el.innerHTML = ""; });
 
-        const es = new EventSource("/api/indices/stream");
+        const selectedDate = datePicker ? datePicker.value : "";
+        const streamUrl = selectedDate
+            ? `/api/indices/stream?date=${encodeURIComponent(selectedDate)}`
+            : "/api/indices/stream";
+        const es = new EventSource(streamUrl);
 
         es.onmessage = function(event) {
             try {

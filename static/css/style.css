@@ -441,12 +441,28 @@ header h1 {
     margin-left: 4px;
 }
 
+.date-picker {
+    padding: 7px 10px;
+    background: #0f1923;
+    border: 1px solid #2a3a4a;
+    border-radius: 8px;
+    color: #c8d6e5;
+    font-size: 0.85rem;
+    outline: none;
+    cursor: pointer;
+    margin-left: auto;
+    color-scheme: dark;
+}
+
+.date-picker:focus {
+    border-color: #6366f1;
+}
+
 .btn-indices {
     background: #6366f1;
     color: #fff;
     padding: 8px 20px;
     font-size: 0.9rem;
-    margin-left: auto;
 }
 
 .btn-indices:hover {
