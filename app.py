@@ -229,13 +229,16 @@ def analyze_stream():
             batch_results = []
             for ticker, info in batch:
                 try:
-                    analysis = analyze_with_gemini(ticker, info)
+                    name = info.get("name", ticker)
+                    headlines = fetch_naver_news_for_ticker(ticker, name)
+                    analysis = analyze_with_gemini(ticker, info, news_headlines=headlines)
 
                     batch_results.append({
                         "ticker": ticker,
-                        "name": info.get("name", ticker),
+                        "name": name,
                         "change_pct": info["change_pct"],
                         "analysis": analysis,
+                        "news": headlines,
                     })
 
                 except Exception as e:
@@ -245,6 +248,7 @@ def analyze_stream():
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": f"Analysis failed: {str(e)}",
+                        "news": [],
                     })
 
                 gc.collect()
@@ -324,7 +328,7 @@ def fetch_single_ticker(ticker_symbol):
         }
 
 
-def analyze_with_gemini(ticker, stock_info):
+def analyze_with_gemini(ticker, stock_info, news_headlines=None):
     """Use Gemini 2.5 Pro to analyze stock price movement."""
     if not GEMINI_API_KEY:
         return "Gemini API key not configured."
@@ -337,19 +341,25 @@ def analyze_with_gemini(ticker, stock_info):
     change_pct = stock_info["change_pct"]
     trade_date = stock_info.get("date", "")
 
+    news_section = ""
+    if news_headlines:
+        news_lines = "\n".join(f"  - {h}" for h in news_headlines)
+        news_section = f"\n네이버 실시간 뉴스 헤드라인:\n{news_lines}\n"
+
     prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause.
 
 Stock: {name} ({ticker})
 Change: {change_pct:+.1f}%
 Date: {trade_date}
-
+{news_section}
 Instructions:
 1. 출력은 한글로 해라.
 2. 한글로 1-2문장으로 간결하게 원인을 분석해라. (명사형 종결)
 3. 종목명이나 변동률은 출력하지 마라.
-4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
-5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
-6. 한글 분석 후 영어로 한 문장 요약 추가.
+4. 뉴스 헤드라인이 있으면 반드시 근거로 활용해라.
+5. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
+6. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
+7. 한글 분석 후 영어로 한 문장 요약 추가.
 """
 
     try:
@@ -496,6 +506,38 @@ def fetch_naver_news(region, display=5):
             logger.warning(f"Naver news fetch failed ({query}): {e}")
 
     return headlines
+
+
+def fetch_naver_news_for_ticker(ticker, name, display=5):
+    """Fetch recent Naver news headlines for a specific stock ticker."""
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        return []
+
+    headers = {
+        "X-Naver-Client-Id": NAVER_CLIENT_ID,
+        "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+    }
+    headlines = []
+    # Build queries: company name first, then ticker symbol as fallback
+    queries = [name, ticker] if name and name != ticker else [ticker]
+
+    for query in queries[:2]:
+        try:
+            resp = requests.get(
+                "https://openapi.naver.com/v1/search/news.json",
+                headers=headers,
+                params={"query": query, "display": display, "sort": "date"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("items", []):
+                    title = item.get("title", "").replace("<b>", "").replace("</b>", "")
+                    if title and title not in headlines:
+                        headlines.append(title)
+        except Exception as e:
+            logger.warning(f"Naver news fetch failed ({query}): {e}")
+
+    return headlines[:display]
 
 
 def get_indices_news_summary(indices_data):

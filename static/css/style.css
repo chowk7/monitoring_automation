@@ -367,6 +367,42 @@ header h1 {
     margin-bottom: 10px;
 }
 
+/* ─── Ticker Naver News ──────────────────────────────────────────────────── */
+.result-news {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #2a3a4a;
+}
+
+.result-news-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6366f1;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.result-news ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.result-news li {
+    font-size: 0.8rem;
+    color: #7a8fa8;
+    padding: 3px 0 3px 12px;
+    position: relative;
+    line-height: 1.5;
+}
+
+.result-news li::before {
+    content: "·";
+    position: absolute;
+    left: 2px;
+    color: #4a5a6a;
+}
+
 /* ─── Article List ────────────────────────────────────────────────────────── */
 .result-articles {
     margin-top: 16px;

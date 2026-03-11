@@ -547,6 +547,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const sign = result.change_pct > 0 ? "+" : "";
             const analysisHtml = formatAnalysis(result.analysis);
 
+            let newsHtml = "";
+            if (result.news && result.news.length > 0) {
+                const items = result.news.map(h => `<li>${escapeHtml(h)}</li>`).join("");
+                newsHtml = `<div class="result-news"><span class="result-news-label">📰 네이버 뉴스</span><ul>${items}</ul></div>`;
+            }
+
             html += `
                 <div class="result-card ${cls}">
                     <div class="result-header">
@@ -555,6 +561,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span class="result-meta">Gemini 2.5 Pro 분석</span>
                     </div>
                     <div class="result-analysis">${analysisHtml}</div>
+                    ${newsHtml}
                 </div>
             `;
         }
