@@ -985,11 +985,16 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
         if target_date:
-            # Filter to entries on or before target_date (compare in KST = UTC+9)
+            # Filter to entries on or before target_date using UTC date.
+            # Yahoo Finance daily bar timestamps are anchored at market-open in
+            # the exchange's local timezone (e.g. 9:30 AM EST = 14:30 UTC for
+            # NYSE).  Converting to KST shifts US dates forward by ~1 day, so
+            # a 3/16 NYSE bar would appear as 3/17 KST and get incorrectly
+            # excluded.  Comparing in UTC avoids this problem for all markets.
             filtered = []
             for ts, c in valid:
-                kst_date = (datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)).date()
-                if kst_date <= target_date:
+                utc_date = datetime.fromtimestamp(ts, tz=timezone.utc).date()
+                if utc_date <= target_date:
                     filtered.append((ts, c))
             if len(filtered) >= 2:
                 valid = filtered
@@ -1004,8 +1009,8 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        # Report date in KST
-        last_date = (datetime.fromtimestamp(valid[-1][0], tz=timezone.utc) + timedelta(hours=9)).date()
+        # Report date in UTC (consistent with the filter above)
+        last_date = datetime.fromtimestamp(valid[-1][0], tz=timezone.utc).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
