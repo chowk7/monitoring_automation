@@ -3,11 +3,11 @@ import gc
 import csv
 import json
 import logging
+import secrets
 import smtplib
-from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timedelta, timezone, date as date_cls
 from email.mime.text import MIMEText
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
@@ -28,19 +28,191 @@ logger = logging.getLogger(__name__)
 
 # CSV file for ticker storage
 TICKERS_CSV_FILE = "tickers.csv"
+SETTINGS_FILE = "settings.json"
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Google CSE uses the same API key as Gemini by default
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "") or GEMINI_API_KEY
+GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 
-# SMTP Configuration
-SMTP_HOST     = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT     = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER     = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+# Email configuration
+SMTP_HOST = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "lub2sky@gmail.com"
+SMTP_PASSWORD = "rasmdixgbznopxel"
+EMAIL_FROM = "lub2sky@gmail.com"
+EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients (env)
+DEFAULT_EMAIL_RECIPIENTS = list(dict.fromkeys(
+    [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()]
+    + ["lub2sky@gmail.com", "yunseong.cho@samsung.com", "hn.chung@samsung.com"]
+))  # hardcoded defaults merged with env
 
-# Comma-separated default recipient list, e.g. "a@example.com,b@example.com"
-_raw_default  = os.getenv("DEFAULT_RECIPIENTS", "")
-DEFAULT_RECIPIENTS = [e.strip() for e in _raw_default.split(",") if e.strip()]
+# Available Gemini models (for autocomplete suggestions; manual input also allowed)
+AVAILABLE_GEMINI_MODELS = [
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro (기본값)"},
+    {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash (빠름)"},
+    {"id": "gemini-2.0-flash-lite", "label": "Gemini 2.0 Flash Lite (최고속)"},
+    {"id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro"},
+    {"id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash"},
+    {"id": "gemini-2.5-flash-preview-04-17", "label": "Gemini 2.5 Flash Preview"},
+]
+DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+
+# Default tickers pre-loaded on first run (list of dicts: ticker, category, name)
+DEFAULT_TICKERS = [
+    # 반도체
+    {"ticker": "IFX.DE",     "category": "반도체", "name": "인피니언"},
+    {"ticker": "NXPI",       "category": "반도체", "name": "NXP 세미콘덕터"},
+    {"ticker": "STMPA.PA",   "category": "반도체", "name": "ST마이크로"},
+    {"ticker": "ON",         "category": "반도체", "name": "온세미"},
+    {"ticker": "WOLF",       "category": "반도체", "name": "울프스피드"},
+    {"ticker": "6723.T",     "category": "반도체", "name": "르네사스"},
+    {"ticker": "NVDA",       "category": "반도체", "name": "엔비디아"},
+    {"ticker": "AMD",        "category": "반도체", "name": "AMD"},
+    {"ticker": "ARM",        "category": "반도체", "name": "ARM 홀딩스"},
+    {"ticker": "QCOM",       "category": "반도체", "name": "퀄컴"},
+    {"ticker": "INTC",       "category": "반도체", "name": "인텔"},
+    {"ticker": "AVGO",       "category": "반도체", "name": "브로드컴"},
+    {"ticker": "MRVL",       "category": "반도체", "name": "마벨"},
+    {"ticker": "MU",         "category": "반도체", "name": "마이크론"},
+    {"ticker": "000660.KS",  "category": "반도체", "name": "SK하이닉스"},
+    {"ticker": "WDC",        "category": "반도체", "name": "웨스턴 디지털"},
+    {"ticker": "285A.T",     "category": "반도체", "name": "일본 신규상장주"},
+    {"ticker": "2330.TW",    "category": "반도체", "name": "TSMC"},
+    {"ticker": "GFS",        "category": "반도체", "name": "글로벌파운드리"},
+    {"ticker": "0981.HK",    "category": "반도체", "name": "SMIC"},
+    {"ticker": "ASML.AS",    "category": "반도체", "name": "ASML"},
+    # 네트워크
+    {"ticker": "CIEN",       "category": "네트워크", "name": "시에나"},
+    {"ticker": "NOKIA.HE",   "category": "네트워크", "name": "노키아"},
+    {"ticker": "ERIC-B.ST",  "category": "네트워크", "name": "에릭슨"},
+    {"ticker": "CSCO",       "category": "네트워크", "name": "시스코"},
+    # 바이오
+    {"ticker": "068270.KS",  "category": "바이오", "name": "셀트리온"},
+    {"ticker": "BIIB",       "category": "바이오", "name": "바이오젠"},
+    {"ticker": "OGN",        "category": "바이오", "name": "오가논"},
+    {"ticker": "MRNA",       "category": "바이오", "name": "모더나"},
+    {"ticker": "PFE",        "category": "바이오", "name": "화이자"},
+    {"ticker": "AMGN",       "category": "바이오", "name": "암젠"},
+    {"ticker": "ROG.SW",     "category": "바이오", "name": "로슈"},
+    {"ticker": "LLY",        "category": "바이오", "name": "일라이 릴리"},
+    {"ticker": "NVO",        "category": "바이오", "name": "노보 노디스크"},
+    {"ticker": "4523.T",     "category": "바이오", "name": "에이사이"},
+    {"ticker": "LONN.SW",    "category": "바이오", "name": "론자"},
+    {"ticker": "4901.T",     "category": "바이오", "name": "후지필름"},
+    {"ticker": "OXB.L",      "category": "바이오", "name": "옥스퍼드 바이오메디카"},
+    {"ticker": "2269.HK",    "category": "바이오", "name": "우시 바이오"},
+    {"ticker": "2359.HK",    "category": "바이오", "name": "우시 앱텍"},
+    {"ticker": "BANB.SW",    "category": "바이오", "name": "바실리아"},
+    {"ticker": "PPGN.SW",    "category": "바이오", "name": "폴리펩타이드"},
+    # 의료기기
+    {"ticker": "GEHC",       "category": "의료기기", "name": "GE 헬스케어"},
+    {"ticker": "PHIA.AS",    "category": "의료기기", "name": "필립스"},
+    {"ticker": "SHL.DE",     "category": "의료기기", "name": "지멘스 헬시니어스"},
+    {"ticker": "PACB",       "category": "의료기기", "name": "퍼시픽 바이오사이언스"},
+    {"ticker": "TEM",        "category": "의료기기", "name": "템퍼스 AI"},
+    {"ticker": "GH",         "category": "의료기기", "name": "가드런트 헬스"},
+    {"ticker": "ILMN",       "category": "의료기기", "name": "일루미나"},
+    {"ticker": "GRAL",       "category": "의료기기", "name": "그레일"},
+    # 공조
+    {"ticker": "JCI",        "category": "공조", "name": "존슨 컨트롤즈"},
+    {"ticker": "TT",         "category": "공조", "name": "트레인 테크놀로지"},
+    {"ticker": "CARR",       "category": "공조", "name": "캐리어 글로벌"},
+    {"ticker": "LII",        "category": "공조", "name": "레녹스"},
+    {"ticker": "VRT",        "category": "공조", "name": "버티브 홀딩스"},
+    # 가전
+    {"ticker": "ELUX-B.ST",  "category": "가전", "name": "일렉트로룩스"},
+    {"ticker": "WHR",        "category": "가전", "name": "월풀"},
+    # 전장
+    {"ticker": "APTV",       "category": "전장", "name": "앱티브"},
+    {"ticker": "AMV0.DE",    "category": "전장", "name": "아우토모티브 셀"},
+    {"ticker": "TSLA",       "category": "전장", "name": "테슬라"},
+    {"ticker": "MBLY",       "category": "전장", "name": "모빌아이"},
+    {"ticker": "VOW.DE",     "category": "전장", "name": "폭스바겐"},
+    {"ticker": "002594.SZ",  "category": "전장", "name": "BYD"},
+    {"ticker": "005380.KS",  "category": "전장", "name": "현대차"},
+    # 게임
+    {"ticker": "RBLX",       "category": "게임", "name": "로블록스"},
+    {"ticker": "U",          "category": "게임", "name": "유니티"},
+    {"ticker": "3659.T",     "category": "게임", "name": "넥슨"},
+    # 기타
+    {"ticker": "AAPL",       "category": "기타", "name": "애플"},
+    {"ticker": "MSFT",       "category": "기타", "name": "마이크로소프트"},
+    {"ticker": "AMZN",       "category": "기타", "name": "아마존"},
+    {"ticker": "GOOGL",      "category": "기타", "name": "알파벳 A"},
+    {"ticker": "META",       "category": "기타", "name": "메타"},
+    {"ticker": "9988.HK",    "category": "기타", "name": "알리바바"},
+    {"ticker": "6758.T",     "category": "기타", "name": "소니"},
+    {"ticker": "373220.KS",  "category": "기타", "name": "LG에너지솔루션"},
+    {"ticker": "GLW",        "category": "기타", "name": "코닝"},
+    {"ticker": "6324.T",     "category": "기타", "name": "하모닉 드라이브"},
+    # 삼성
+    {"ticker": "005930.KS",  "category": "삼성", "name": "삼성전자"},
+    {"ticker": "028260.KS",  "category": "삼성", "name": "삼성물산"},
+    {"ticker": "006400.KS",  "category": "삼성", "name": "삼성SDI"},
+    {"ticker": "018260.KS",  "category": "삼성", "name": "삼성에스디에스"},
+    {"ticker": "032830.KS",  "category": "삼성", "name": "삼성생명"},
+    {"ticker": "009150.KS",  "category": "삼성", "name": "삼성전기"},
+    {"ticker": "000810.KS",  "category": "삼성", "name": "삼성화재"},
+    {"ticker": "029780.KS",  "category": "삼성", "name": "삼성카드"},
+    {"ticker": "008770.KS",  "category": "삼성", "name": "호텔신라"},
+    {"ticker": "012750.KS",  "category": "삼성", "name": "에스원"},
+    {"ticker": "010140.KS",  "category": "삼성", "name": "삼성중공업"},
+    {"ticker": "016360.KS",  "category": "삼성", "name": "삼성증권"},
+    {"ticker": "028050.KS",  "category": "삼성", "name": "삼성엔지니어링"},
+    {"ticker": "030000.KS",  "category": "삼성", "name": "제일기획"},
+    {"ticker": "0126Z0.KS",  "category": "삼성", "name": "에피스"},
+    {"ticker": "207940.KS",  "category": "삼성", "name": "삼성바이오로직스"},
+]
+
+# Global market indices
+MARKET_INDICES = [
+    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국"},
+    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국"},
+    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국"},
+    {"ticker": "^KS11",     "name": "코스피",    "region": "한국"},
+    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국"},
+    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국"},
+    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩"},
+    {"ticker": "^N225",     "name": "닛케이225", "region": "일본"},
+    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국"},
+    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스"},
+    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일"},
+]
+
+# Region → ticker mapping for market news search
+MARKET_NEWS_REGIONS = {
+    "미국":  {"ticker": "^DJI",      "query": "US stock market Dow Jones Nasdaq S&P 500"},
+    "한국":  {"ticker": "^KS11",     "query": "KOSPI KOSDAQ 코스피 코스닥 주식시장"},
+    "중국":  {"ticker": "000001.SS", "query": "China Shanghai stock market"},
+    "홍콩":  {"ticker": "^HSI",      "query": "Hong Kong Hang Seng stock market"},
+    "일본":  {"ticker": "^N225",     "query": "Japan Nikkei 225 stock market"},
+    "유럽":  {"ticker": "^FTSE",     "query": "European stock market FTSE DAX CAC"},
+}
+
+# Default Gemini prompt templates
+# Available variables: {name}, {ticker}, {change_pct}, {trade_date}
+# Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
+DEFAULT_PROMPT_WITH_ARTICLES = """You are a stock market analyst. The following news articles were collected for this stock on or around the analysis date.
+
+Stock: {name} ({ticker})
+Change: {change_pct}%
+Date: {trade_date}
+
+수집된 뉴스 기사 ({articles_count}건, 출처: {sources_label}):
+{articles_text}
+
+Instructions:
+1. 출력은 한글로 해라.
+2. 제공된 기사 내용만을 근거로 주가 변동 이유를 2문장 이내로 간결하게 정리해라. (명사형 종결)
+3. 종목명이나 변동률은 출력하지 마라.
+4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 "개별이슈 미발견"으로만 출력해라.
+5. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+6. 유효한 분석이 있는 경우에만 한글 분석 후 영어로 한 문장 요약 추가. "개별이슈 미발견"인 경우 영어 요약 생략."""
+
+DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
@@ -48,6 +220,8 @@ _gemini_client = None
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
 ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
+
+KST = timezone(timedelta(hours=9))
 
 
 def log_memory(label=""):
@@ -65,30 +239,92 @@ def get_gemini_client():
     return _gemini_client
 
 
+def apply_template(template, **kwargs):
+    """Safe template variable substitution using {varname} placeholders."""
+    for key, value in kwargs.items():
+        template = template.replace("{" + key + "}", str(value))
+    return template
+
+
+def get_kst_today():
+    """Return today's date in KST (UTC+9)."""
+    return datetime.now(KST).date()
+
+
+# ─── Settings Management ──────────────────────────────────────────────────────
+
+def load_settings():
+    """Load settings from JSON file."""
+    defaults = {
+        "gemini_model": DEFAULT_GEMINI_MODEL,
+        "email_recipients": [],
+        "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
+        "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
+        "custom_query": "",
+        "change_threshold": 5.0,
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                defaults.update(data)
+        except Exception as e:
+            logger.error(f"Error reading settings: {e}")
+    return defaults
+
+
+def save_settings(settings):
+    """Save settings to JSON file."""
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error writing settings: {e}")
+
+
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
 
 def load_tickers_from_csv():
-    """Load tickers from CSV file."""
-    tickers = []
-    if os.path.exists(TICKERS_CSV_FILE):
-        try:
-            with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if row and row[0].strip():
-                        tickers.append(row[0].strip().upper())
-        except Exception as e:
-            logger.error(f"Error reading CSV: {e}")
-    return tickers
+    """Load tickers from CSV file. Returns list of dicts: {ticker, category, name}.
+
+    Auto-initializes with DEFAULT_TICKERS only on the very first run (file not found).
+    Supports both new 3-column format (ticker,category,name) and legacy 1-column format.
+    """
+    if not os.path.exists(TICKERS_CSV_FILE):
+        save_tickers_to_csv(DEFAULT_TICKERS)
+        logger.info(f"Initialized with {len(DEFAULT_TICKERS)} default tickers.")
+        return list(DEFAULT_TICKERS)
+
+    ticker_list = []
+    try:
+        with open(TICKERS_CSV_FILE, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if not row or not row[0].strip():
+                    continue
+                ticker = row[0].strip().upper()
+                category = row[1].strip() if len(row) > 1 else ""
+                name = row[2].strip() if len(row) > 2 else ""
+                ticker_list.append({"ticker": ticker, "category": category, "name": name})
+    except Exception as e:
+        logger.error(f"Error reading CSV: {e}")
+    return ticker_list
 
 
-def save_tickers_to_csv(tickers):
-    """Save tickers to CSV file."""
+def save_tickers_to_csv(ticker_list):
+    """Save list of ticker dicts ({ticker, category, name}) to CSV file."""
     try:
         with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            for ticker in tickers:
-                writer.writerow([ticker])
+            for item in ticker_list:
+                if isinstance(item, dict):
+                    writer.writerow([
+                        item.get("ticker", ""),
+                        item.get("category", ""),
+                        item.get("name", ""),
+                    ])
+                else:
+                    writer.writerow([str(item), "", ""])
     except Exception as e:
         logger.error(f"Error writing CSV: {e}")
 
@@ -97,13 +333,13 @@ def save_tickers_to_csv(tickers):
 
 @app.route("/")
 def index():
-    return render_template("index.html", default_recipients=DEFAULT_RECIPIENTS)
+    return render_template("index.html")
 
 
 @app.route("/api/tickers", methods=["GET"])
 def get_tickers():
-    tickers = load_tickers_from_csv()
-    return jsonify({"tickers": tickers})
+    ticker_list = load_tickers_from_csv()
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers", methods=["POST"])
@@ -113,44 +349,56 @@ def add_ticker():
     if not ticker:
         return jsonify({"error": "Ticker is required"}), 400
 
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
+    category = data.get("category", "").strip()
+    name = data.get("name", "").strip()
+
+    ticker_list = load_tickers_from_csv()
+    existing = [t["ticker"] for t in ticker_list]
+    if ticker in existing:
         return jsonify({"error": f"{ticker} is already added"}), 400
 
-    tickers.append(ticker)
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    ticker_list.append({"ticker": ticker, "category": category, "name": name})
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers/<ticker>", methods=["DELETE"])
 def delete_ticker(ticker):
     ticker = ticker.upper()
-    tickers = load_tickers_from_csv()
-    if ticker in tickers:
-        tickers.remove(ticker)
-        save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers})
+    ticker_list = load_tickers_from_csv()
+    ticker_list = [t for t in ticker_list if t["ticker"] != ticker]
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list})
 
 
 @app.route("/api/tickers/bulk", methods=["POST"])
 def bulk_add_tickers():
-    """Add multiple tickers at once (from CSV upload or text input)."""
+    """Add multiple tickers at once. Accepts list of strings or dicts."""
     data = request.get_json()
-    new_tickers = data.get("tickers", [])
+    new_items = data.get("tickers", [])
 
-    if not new_tickers:
+    if not new_items:
         return jsonify({"error": "No tickers provided"}), 400
 
-    tickers = load_tickers_from_csv()
+    ticker_list = load_tickers_from_csv()
+    existing = {t["ticker"] for t in ticker_list}
     added = []
-    for t in new_tickers:
-        t = t.strip().upper()
-        if t and t not in tickers:
-            tickers.append(t)
+    for item in new_items:
+        if isinstance(item, dict):
+            t = item.get("ticker", "").strip().upper()
+            cat = item.get("category", "").strip()
+            nm = item.get("name", "").strip()
+        else:
+            t = str(item).strip().upper()
+            cat = ""
+            nm = ""
+        if t and t not in existing:
+            ticker_list.append({"ticker": t, "category": cat, "name": nm})
+            existing.add(t)
             added.append(t)
 
-    save_tickers_to_csv(tickers)
-    return jsonify({"tickers": tickers, "added": added, "added_count": len(added)})
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
 
 
 @app.route("/api/tickers/clear", methods=["DELETE"])
@@ -160,15 +408,388 @@ def clear_tickers():
     return jsonify({"tickers": [], "message": "All tickers cleared"})
 
 
+@app.route("/api/tickers/reset-defaults", methods=["POST"])
+def reset_tickers_to_defaults():
+    """Reset tickers to the built-in default list."""
+    save_tickers_to_csv(DEFAULT_TICKERS)
+    return jsonify({"tickers": list(DEFAULT_TICKERS), "count": len(DEFAULT_TICKERS)})
+
+
+@app.route("/api/tickers/upload", methods=["POST"])
+def upload_tickers_csv():
+    """Upload a CSV file to add tickers. First column = ticker symbol."""
+    if "file" not in request.files:
+        return jsonify({"error": "파일이 없습니다"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "파일을 선택해주세요"}), 400
+
+    # Try UTF-8 first, then EUC-KR
+    content = None
+    for encoding in ("utf-8-sig", "utf-8", "euc-kr"):
+        try:
+            file.seek(0)
+            content = file.read().decode(encoding)
+            break
+        except (UnicodeDecodeError, Exception):
+            continue
+
+    if content is None:
+        return jsonify({"error": "파일 인코딩 오류 (UTF-8 또는 EUC-KR 지원)"}), 400
+
+    # Parse CSV – detect format by header row
+    SKIP_HEADERS = {"ticker", "symbol", "yahoo finance ticker", "종목코드", "티커", "종목명", "name", "code", "category"}
+    lines = [l for l in content.splitlines() if l.strip()]
+    if not lines:
+        return jsonify({"error": "CSV에서 티커를 찾을 수 없습니다."}), 400
+
+    # Detect if header row exists and determine column layout
+    first_parts = [p.strip().strip('"').strip("'").lower() for p in lines[0].split(",")]
+    has_header = first_parts[0] in SKIP_HEADERS
+    # Detect Category,Ticker,Name layout (col0=category, col1=ticker)
+    is_cat_ticker_name = (
+        has_header and len(first_parts) >= 2 and
+        first_parts[0] in {"category", "카테고리"} and
+        first_parts[1] in {"ticker", "yahoo finance ticker", "종목코드", "티커", "symbol"}
+    )
+
+    new_items = []
+    for line in (lines[1:] if has_header else lines):
+        parts = [p.strip().strip('"').strip("'") for p in line.split(",")]
+        if is_cat_ticker_name:
+            cat = parts[0] if len(parts) > 0 else ""
+            ticker = parts[1].upper() if len(parts) > 1 else ""
+            nm = parts[2] if len(parts) > 2 else ""
+        else:
+            ticker = parts[0].upper() if parts else ""
+            cat = ""
+            nm = parts[1] if len(parts) > 1 else ""
+        if ticker and ticker.lower() not in SKIP_HEADERS:
+            new_items.append({"ticker": ticker, "category": cat, "name": nm})
+
+    if not new_items:
+        return jsonify({"error": "CSV에서 티커를 찾을 수 없습니다."}), 400
+
+    ticker_list = load_tickers_from_csv()
+    existing = {t["ticker"] for t in ticker_list}
+    added = []
+    for item in new_items:
+        if item["ticker"] not in existing:
+            ticker_list.append(item)
+            existing.add(item["ticker"])
+            added.append(item["ticker"])
+
+    save_tickers_to_csv(ticker_list)
+    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
+
+
+# ─── Settings Routes ──────────────────────────────────────────────────────────
+
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    settings = load_settings()
+    settings["available_models"] = AVAILABLE_GEMINI_MODELS
+    settings["has_google_search"] = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
+    settings["has_email"] = bool(SMTP_USER and SMTP_PASSWORD)
+    settings["news_sources"] = {
+        "yahoo_finance": True,  # always available, no API key needed
+        "newsapi": bool(NEWS_API_KEY),
+        "google_cse": bool(GOOGLE_API_KEY and GOOGLE_CSE_ID),
+    }
+    settings["default_prompt_with_articles"] = DEFAULT_PROMPT_WITH_ARTICLES
+    settings["default_prompt_without_articles"] = DEFAULT_PROMPT_WITHOUT_ARTICLES
+    return jsonify(settings)
+
+
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    data = request.get_json()
+    settings = load_settings()
+    if "gemini_model" in data:
+        settings["gemini_model"] = data["gemini_model"]
+    if "prompt_with_articles" in data:
+        settings["prompt_with_articles"] = data["prompt_with_articles"]
+    if "prompt_without_articles" in data:
+        settings["prompt_without_articles"] = data["prompt_without_articles"]
+    if "custom_query" in data:
+        settings["custom_query"] = data["custom_query"]
+    if "change_threshold" in data:
+        try:
+            val = float(data["change_threshold"])
+            if 0 < val <= 100:
+                settings["change_threshold"] = val
+        except (TypeError, ValueError):
+            pass
+    save_settings(settings)
+    return jsonify(settings)
+
+
+# ─── Email Recipients Routes ──────────────────────────────────────────────────
+
+@app.route("/api/email/recipients", methods=["GET"])
+def get_email_recipients():
+    settings = load_settings()
+    extra_list = settings.get("email_recipients", [])
+    return jsonify({
+        "default_recipients": DEFAULT_EMAIL_RECIPIENTS,
+        "extra_recipients": extra_list,
+        "has_email_config": True,
+    })
+
+
+@app.route("/api/email/recipients", methods=["POST"])
+def add_email_recipient():
+    data = request.get_json()
+    email_addr = data.get("email", "").strip().lower()
+    if not email_addr or "@" not in email_addr:
+        return jsonify({"error": "유효한 이메일 주소를 입력해주세요"}), 400
+
+    settings = load_settings()
+    recipients = settings.get("email_recipients", [])
+    if email_addr in recipients:
+        return jsonify({"error": f"{email_addr} 는 이미 등록되어 있습니다"}), 400
+
+    recipients.append(email_addr)
+    settings["email_recipients"] = recipients
+    save_settings(settings)
+    return jsonify({"extra_recipients": recipients})
+
+
+@app.route("/api/email/recipients/<path:email_addr>", methods=["DELETE"])
+def delete_email_recipient(email_addr):
+    settings = load_settings()
+    recipients = settings.get("email_recipients", [])
+    email_addr = email_addr.lower()
+    if email_addr in recipients:
+        recipients.remove(email_addr)
+        settings["email_recipients"] = recipients
+        save_settings(settings)
+    return jsonify({"extra_recipients": recipients})
+
+
+@app.route("/api/send-email", methods=["POST"])
+def send_email_report():
+    """Send analysis results via email."""
+    data = request.get_json()
+    results = data.get("results", [])
+    extra_to = data.get("extra_to", [])  # Additional one-time recipients from request
+    market_data = data.get("market_data", None)
+
+    if not results:
+        return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
+
+    # Build recipient list
+    settings = load_settings()
+    extra_list = settings.get("email_recipients", [])
+    all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + extra_list + extra_to))
+
+    if not all_recipients:
+        return jsonify({"error": "수신자 이메일이 없습니다. 수신자를 추가해주세요."}), 400
+
+    # Build HTML email
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {today}"
+    html_body = build_email_html(results, today, market_data=market_data)
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_FROM or SMTP_USER
+        msg["To"] = ", ".join(all_recipients)
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+
+        return jsonify({"success": True, "sent_to": all_recipients, "count": len(all_recipients)})
+
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"error": "SMTP 인증 실패. 이메일/비밀번호를 확인해주세요."}), 400
+    except Exception as e:
+        logger.error(f"Email send error: {e}")
+        return jsonify({"error": f"이메일 전송 실패: {str(e)}"}), 500
+
+
+def build_email_html(results, date_str, market_data=None):
+    """Build HTML content for email report."""
+    # Build market indices section
+    market_section = ""
+    if market_data and market_data.get("indices"):
+        idx_rows = ""
+        for idx in market_data["indices"]:
+            chg = idx.get("change_pct", 0)
+            color = "#10b981" if chg > 0 else "#ef4444" if chg < 0 else "#aaa"
+            sign = "+" if chg > 0 else ""
+            err_note = ' <small style="color:#5a6a7a;">(오류)</small>' if idx.get("error") else ""
+            idx_rows += f'<tr><td style="padding:6px 12px;color:#ccc;">{idx["name"]}<small style="color:#5a6a7a;margin-left:4px;">({idx["region"]})</small></td><td style="padding:6px 12px;color:{color};font-weight:bold;">{sign}{chg:.2f}%{err_note}</td></tr>'
+
+        analysis_html = (market_data.get("analysis") or "").replace("\n", "<br>")
+        market_section = f"""
+        <h2 style="color:#60a5fa;margin-top:24px;margin-bottom:8px;">글로벌 시장 지수</h2>
+        <table style="width:100%;border-collapse:collapse;background:#1a2634;border-radius:8px;overflow:hidden;margin-bottom:12px;">
+            {idx_rows}
+        </table>
+        <div style="background:#1e2f42;padding:12px;border-radius:8px;color:#ccc;line-height:1.6;margin-bottom:20px;">
+            <strong style="color:#93c5fd;">시장 분석</strong><br>{analysis_html}
+        </div>
+        """
+
+    rows = ""
+    for r in results:
+        sign = "+" if r["change_pct"] > 0 else ""
+        color = "#10b981" if r["change_pct"] > 0 else "#ef4444"
+        analysis_text = r.get("analysis", "").replace("\n", "<br>")
+        news_badge = ""
+        if r.get("articles_found"):
+            news_badge = '<span style="background:#3b82f6;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;margin-left:6px;">뉴스 참고</span>'
+
+        # Build article links
+        articles_html = ""
+        if r.get("articles"):
+            article_items = ""
+            for a in r["articles"]:
+                date_part = f'<span style="color:#5a6a7a;font-size:10px;margin-right:6px;">{a["date"]}</span>' if a.get("date") else ""
+                if a.get("link"):
+                    article_items += f'<li style="padding:3px 0;">{date_part}<a href="{a["link"]}" style="color:#7ab3e0;">{a["title"]}</a> <small style="color:#5a6a7a;">({a.get("source","")})</small></li>'
+                else:
+                    article_items += f'<li style="padding:3px 0;">{date_part}{a["title"]} <small style="color:#5a6a7a;">({a.get("source","")})</small></li>'
+            articles_html = f'<ul style="margin:8px 0 0 0;padding-left:16px;font-size:12px;">{article_items}</ul>'
+
+        rows += f"""
+        <tr>
+            <td style="padding:12px;border-bottom:1px solid #2a3a4a;">
+                <strong>{r['name']}</strong> ({r['ticker']})
+                <span style="color:{color};font-weight:bold;margin-left:8px;">{sign}{r['change_pct']:.1f}%</span>
+                {news_badge}
+                <br><small style="color:#aaa;">{r.get('model_used', 'Gemini')}</small>
+                <div style="margin-top:8px;color:#ccc;line-height:1.5;">{analysis_text}</div>
+                {articles_html}
+            </td>
+        </tr>
+        """
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"></head>
+    <body style="background:#0f1923;color:#e0e6ed;font-family:Arial,sans-serif;margin:0;padding:20px;">
+        <div style="max-width:700px;margin:0 auto;">
+            <h1 style="color:#3b82f6;margin-bottom:4px;">Stock Movement Analyzer</h1>
+            <p style="color:#aaa;margin-top:0;">분석 날짜: {date_str}</p>
+            {market_section}
+            <h2 style="color:#60a5fa;margin-bottom:8px;">종목 변동 분석</h2>
+            <table style="width:100%;border-collapse:collapse;background:#1a2634;border-radius:8px;overflow:hidden;">
+                {rows}
+            </table>
+            <p style="color:#555;font-size:12px;margin-top:16px;">This report was automatically generated by Stock Movement Analyzer.</p>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.route("/api/market-indices", methods=["GET"])
+def get_market_indices():
+    """Fetch global market indices and analyze with news."""
+    date_str = request.args.get("date", "")
+    model = request.args.get("model", "")
+
+    target_date = None
+    if date_str:
+        try:
+            target_date = date_cls.fromisoformat(date_str)
+        except ValueError:
+            pass
+    if target_date is None:
+        target_date = get_kst_today()
+
+    if not model:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
+    indices_data = fetch_all_market_indices(target_date)
+    trade_date = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+
+    articles_by_region = {}
+    for region in MARKET_NEWS_REGIONS:
+        articles = search_market_news_for_region(region, trade_date, target_date)
+        if articles:
+            articles_by_region[region] = articles
+
+    analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+
+    return jsonify({
+        "indices": indices_data,
+        "analysis": analysis,
+        "date": trade_date,
+        "articles_by_region": {
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            for region, arts in articles_by_region.items()
+        },
+    })
+
+
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
-    tickers = load_tickers_from_csv()
-    if not tickers:
+    ticker_objects = load_tickers_from_csv()
+    if not ticker_objects:
         return jsonify({"error": "No tickers saved."}), 400
+    tickers = [t["ticker"] for t in ticker_objects]
+    ticker_meta = {t["ticker"]: t for t in ticker_objects}
+
+    settings = load_settings()
+    model = request.args.get("model", settings.get("gemini_model", DEFAULT_GEMINI_MODEL))
+    change_threshold = float(request.args.get("threshold", settings.get("change_threshold", 5.0)))
+
+    # Target date: from query param (KST) or today KST
+    date_str = request.args.get("date", "")
+    target_date = None
+    if date_str:
+        try:
+            target_date = date_cls.fromisoformat(date_str)
+        except ValueError:
+            pass
+    if target_date is None:
+        target_date = get_kst_today()
+
+    # Prompt templates from settings
+    prompt_templates = {
+        "with_articles": settings.get("prompt_with_articles") or DEFAULT_PROMPT_WITH_ARTICLES,
+        "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
+    }
+
+    # Custom search query (from query param, fallback to saved setting)
+    custom_query = request.args.get("custom_query", "").strip() or settings.get("custom_query", "")
 
     def generate():
         log_memory("STREAM START")
+
+        # Phase 0: Fetch global market indices + news + Gemini analysis
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
+        indices_data = fetch_all_market_indices(target_date)
+        trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
+        articles_by_region = {}
+        for region in MARKET_NEWS_REGIONS:
+            arts = search_market_news_for_region(region, trade_date_for_market, target_date)
+            if arts:
+                articles_by_region[region] = arts
+
+        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 Gemini 분석 중...'})}\n\n"
+        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+
+        articles_by_region_slim = {
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            for region, arts in articles_by_region.items()
+        }
+        yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
+        gc.collect()
 
         # Phase 1: Fetch all stock data in batches
         all_stocks_slim = {}
@@ -180,30 +801,46 @@ def analyze_stream():
             batch = tickers[batch_idx:batch_idx + FETCH_BATCH_SIZE]
             batch_num = batch_idx // FETCH_BATCH_SIZE + 1
 
-            # Send progress
             yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
 
             for ticker in batch:
-                result = fetch_single_ticker(ticker)
+                result = fetch_single_ticker(ticker, target_date=target_date)
+                meta = ticker_meta.get(ticker, {})
                 all_stocks_slim[ticker] = {
-                    "name": result.get("name", ticker),
+                    "name": result.get("name") or meta.get("name") or ticker,
                     "change_pct": result.get("change_pct", 0),
+                    "category": meta.get("category", ""),
                 }
                 if "error" in result:
                     all_stocks_slim[ticker]["error"] = result["error"]
 
-                if abs(result.get("change_pct", 0)) >= 5.0:
+                if abs(result.get("change_pct", 0)) >= change_threshold:
                     filtered_list.append((ticker, result))
 
             gc.collect()
 
-        # Send all_stocks data
-        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim})}\n\n"
+        # Compute category averages
+        category_stats = {}
+        for tkr, info in all_stocks_slim.items():
+            cat = info.get("category") or "기타"
+            if cat not in category_stats:
+                category_stats[cat] = {"total": 0.0, "count": 0, "tickers": []}
+            category_stats[cat]["tickers"].append(tkr)
+            if not info.get("error"):
+                category_stats[cat]["total"] += info["change_pct"]
+                category_stats[cat]["count"] += 1
+        for cat in category_stats:
+            s = category_stats[cat]
+            s["avg"] = round(s["total"] / s["count"], 2) if s["count"] else 0
+            del s["total"]
+
+        # Send all_stocks data and category stats
+        yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim, 'category_stats': category_stats})}\n\n"
 
         log_memory("AFTER FETCH")
 
         if not filtered_list:
-            yield f"data: {json.dumps({'type': 'done', 'message': 'No stocks with +/- 5% change found.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'message': f'변동률 {change_threshold:g}% 이상인 종목이 없습니다.'})}\n\n"
             return
 
         # Sort filtered list
@@ -211,7 +848,7 @@ def analyze_stream():
 
         yield f"data: {json.dumps({'type': 'progress', 'message': f'{len(filtered_list)}개 종목 분석 시작...'})}\n\n"
 
-        # Phase 2: Analyze filtered stocks in batches using Gemini
+        # Phase 2: Analyze filtered stocks in batches
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
 
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
@@ -220,18 +857,47 @@ def analyze_stream():
 
             log_memory(f"ANALYSIS BATCH {batch_num}")
 
-            yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'분석 중... ({batch_num}/{total_analysis_batches})'})}\n\n"
 
             batch_results = []
             for ticker, info in batch:
                 try:
-                    analysis = analyze_with_gemini(ticker, info)
+                    # Step 1: Search news from all available sources
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
+                    articles = search_all_news_articles(
+                        ticker,
+                        info.get("name", ticker),
+                        info.get("date", ""),
+                        target_date=target_date,
+                        custom_query=custom_query,
+                    )
 
+                    # Step 2: Analyze with Gemini
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({ticker})'})}\n\n"
+                    analysis = analyze_with_gemini(
+                        ticker, info, articles=articles, model=model,
+                        prompt_templates=prompt_templates,
+                    )
+
+                    article_sources = list(set(a.get("source", "") for a in articles if a.get("source")))
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": analysis,
+                        "articles_found": len(articles) > 0,
+                        "articles_count": len(articles),
+                        "articles_sources": article_sources,
+                        "articles": [
+                            {
+                                "title": a["title"],
+                                "link": a.get("link", ""),
+                                "source": a.get("source", ""),
+                                "date": a.get("date", ""),
+                            }
+                            for a in articles[:5]
+                        ],
+                        "model_used": model,
                     })
 
                 except Exception as e:
@@ -240,7 +906,12 @@ def analyze_stream():
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
-                        "analysis": f"Analysis failed: {str(e)}",
+                        "analysis": f"분석 실패: {str(e)}",
+                        "articles_found": False,
+                        "articles_count": 0,
+                        "articles_sources": [],
+                        "articles": [],
+                        "model_used": model,
                     })
 
                 gc.collect()
@@ -248,7 +919,6 @@ def analyze_stream():
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
 
-            # Clear batch data
             del batch_results
             gc.collect()
 
@@ -272,11 +942,31 @@ YAHOO_HEADERS = {
 }
 
 
-def fetch_single_ticker(ticker_symbol):
-    """Fetch a single ticker's data from Yahoo Finance API."""
+def fetch_single_ticker(ticker_symbol, target_date=None):
+    """Fetch a single ticker's data from Yahoo Finance API.
+
+    If target_date (date object, KST) is provided, returns data for that trading day.
+    Otherwise returns the most recent day's data.
+    """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
-        params = {"range": "5d", "interval": "1d"}
+
+        if target_date:
+            # Fetch a 14-day window ending at target_date+2 to account for weekends/holidays
+            period1_dt = datetime.combine(
+                target_date - timedelta(days=14), datetime.min.time()
+            ).replace(tzinfo=timezone.utc)
+            period2_dt = datetime.combine(
+                target_date + timedelta(days=2), datetime.min.time()
+            ).replace(tzinfo=timezone.utc)
+            params = {
+                "period1": int(period1_dt.timestamp()),
+                "period2": int(period2_dt.timestamp()),
+                "interval": "1d",
+            }
+        else:
+            params = {"range": "5d", "interval": "1d"}
+
         resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
 
         if resp.status_code != 200:
@@ -294,6 +984,16 @@ def fetch_single_ticker(ticker_symbol):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
+        if target_date:
+            # Filter to entries on or before target_date (compare in KST = UTC+9)
+            filtered = []
+            for ts, c in valid:
+                kst_date = (datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)).date()
+                if kst_date <= target_date:
+                    filtered.append((ts, c))
+            if len(filtered) >= 2:
+                valid = filtered
+
         if len(valid) < 2:
             return {
                 "error": f"Insufficient data (rows={len(valid)})",
@@ -304,7 +1004,8 @@ def fetch_single_ticker(ticker_symbol):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0]).date()
+        # Report date in KST
+        last_date = (datetime.fromtimestamp(valid[-1][0], tz=timezone.utc) + timedelta(hours=9)).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
@@ -320,8 +1021,331 @@ def fetch_single_ticker(ticker_symbol):
         }
 
 
-def analyze_with_gemini(ticker, stock_info):
-    """Use Gemini 2.5 Pro to analyze stock price movement."""
+def fetch_all_market_indices(target_date=None):
+    """Fetch all global market indices data."""
+    results = []
+    for idx in MARKET_INDICES:
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
+        results.append({
+            "ticker": idx["ticker"],
+            "name": idx["name"],
+            "region": idx["region"],
+            "change_pct": data.get("change_pct", 0),
+            "date": data.get("date", ""),
+            "error": data.get("error", ""),
+        })
+    return results
+
+
+def search_market_news_for_region(region, trade_date, target_date=None):
+    """Search news articles for a global market region."""
+    cfg = MARKET_NEWS_REGIONS.get(region)
+    if not cfg:
+        return []
+    ticker = cfg["ticker"]
+    query = cfg["query"]
+    try:
+        return search_all_news_articles(
+            ticker, query, trade_date,
+            target_date=target_date,
+            custom_query=query,
+        )
+    except Exception:
+        return []
+
+
+def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=None):
+    """Analyze global market index movements using Gemini and collected news."""
+    if not GEMINI_API_KEY:
+        return "Gemini API key not configured."
+    client = get_gemini_client()
+    if not client:
+        return "Gemini client initialization failed."
+    if model is None:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
+    trade_date = next((idx["date"] for idx in indices_data if idx.get("date")), "")
+    indices_text = "\n".join(
+        f"  {idx['name']} ({idx['region']}): {'+' if idx['change_pct'] > 0 else ''}{idx['change_pct']:.2f}%"
+        + (f"  [오류]" if idx.get("error") else "")
+        for idx in indices_data
+    )
+
+    articles_text_parts = []
+    for region, articles in articles_by_region.items():
+        if articles:
+            articles_text_parts.append(f"\n[{region} 뉴스]")
+            for i, a in enumerate(articles[:5]):
+                line = f"  [{i+1}] [{a.get('source', '')}] {a['title']}"
+                if a.get("snippet"):
+                    line += f"\n      {a['snippet']}"
+                articles_text_parts.append(line)
+    articles_text = "\n".join(articles_text_parts) if articles_text_parts else "수집된 뉴스 없음"
+
+    prompt = f"""You are a global financial market analyst.
+
+날짜: {trade_date}
+
+주요 글로벌 지수 등락:
+{indices_text}
+
+수집된 뉴스 기사:
+{articles_text}
+
+Instructions:
+1. 미국·한국·중국/홍콩·일본·유럽 시장별로 등락 원인을 뉴스 근거로 1-2문장씩 간결하게 설명해라.
+2. 뉴스 근거가 없는 지역은 "정보 없음 / No data"으로 표시해라.
+3. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+4. 마지막에 전체 시장 분위기를 1문장으로 요약해라.
+5. 각 문장을 한글로 먼저 쓰고, 바로 아래에 영문 번역을 함께 출력해라. 예시:
+   🇺🇸 미국: 고용지표 호조로 나스닥 상승.
+   🇺🇸 US: Nasdaq rose on strong jobs data.
+   (각 지역마다 동일하게 한글→영문 순서로)"""
+
+    try:
+        response = client.models.generate_content(model=model, contents=prompt)
+        return response.text
+    except Exception as e:
+        return f"분석 실패: {str(e)}"
+
+
+def build_search_query(custom_query, company_name, ticker, fallback):
+    """Return query string: apply custom_query template or use fallback."""
+    if not custom_query:
+        return fallback
+    return custom_query.replace("{종목명}", company_name).replace("{name}", company_name).replace("{ticker}", ticker)
+
+
+def search_news_articles_yahoo_finance(ticker, company_name):
+    """Search news from Yahoo Finance (no API key required)."""
+    try:
+        url = "https://query1.finance.yahoo.com/v1/finance/search"
+        params = {
+            "q": ticker,
+            "lang": "en-US",
+            "region": "US",
+            "quotesCount": 0,
+            "newsCount": 5,
+        }
+        resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
+        if resp.status_code != 200:
+            return []
+
+        data = resp.json()
+        articles = []
+        for item in data.get("news", []):
+            title = item.get("title", "")
+            if title:
+                # Convert providerPublishTime (Unix timestamp) to KST date string
+                pub_ts = item.get("providerPublishTime", 0)
+                pub_date = ""
+                if pub_ts:
+                    pub_date = (
+                        datetime.fromtimestamp(pub_ts, tz=timezone.utc) + timedelta(hours=9)
+                    ).strftime("%Y-%m-%d")
+                articles.append({
+                    "title": title,
+                    "snippet": "",
+                    "link": item.get("link", ""),
+                    "source": "Yahoo Finance",
+                    "date": pub_date,
+                })
+        logger.info(f"Yahoo Finance: found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"Yahoo Finance news error for {ticker}: {e}")
+        return []
+
+
+def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_query=None):
+    """Search news from NewsAPI.org (requires NEWS_API_KEY).
+
+    If target_date is provided, searches articles from target_date to target_date+1.
+    """
+    if not NEWS_API_KEY:
+        return []
+    try:
+        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock')
+        url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": query,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 5,
+            "apiKey": NEWS_API_KEY,
+        }
+        if target_date:
+            params["from"] = str(target_date)
+            params["to"] = str(target_date + timedelta(days=1))
+
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"NewsAPI error {resp.status_code} for {ticker}")
+            return []
+
+        data = resp.json()
+        articles = []
+        for item in data.get("articles", []):
+            title = item.get("title", "")
+            if title and title != "[Removed]":
+                published = item.get("publishedAt", "")
+                articles.append({
+                    "title": title,
+                    "snippet": item.get("description", ""),
+                    "link": item.get("url", ""),
+                    "source": "NewsAPI",
+                    "date": published[:10] if published else "",
+                })
+        logger.info(f"NewsAPI: found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"NewsAPI error for {ticker}: {e}")
+        return []
+
+
+def search_news_articles_google(ticker, company_name, trade_date, target_date=None, custom_query=None):
+    """Search news from Google Custom Search API (requires GOOGLE_API_KEY + GOOGLE_CSE_ID).
+
+    If target_date is provided, restricts results to that date range (date to date+1).
+    """
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        return []
+
+    try:
+        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock news')
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "key": GOOGLE_API_KEY,
+            "cx": GOOGLE_CSE_ID,
+            "q": query,
+            "num": 5,
+        }
+        if target_date:
+            next_date = target_date + timedelta(days=1)
+            params["sort"] = f"date:r:{target_date.strftime('%Y%m%d')}:{next_date.strftime('%Y%m%d')}"
+        else:
+            params["dateRestrict"] = "d3"
+
+        resp = requests.get(url, params=params, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Google Search API error {resp.status_code} for {ticker}")
+            return []
+
+        data = resp.json()
+        articles = []
+        for item in data.get("items", []):
+            title = item.get("title", "")
+            if title:
+                # Try to extract publish date from pagemap (multiple sources)
+                pub_date = ""
+                pagemap = item.get("pagemap", {})
+
+                # 1. Try metatags first
+                metatags = pagemap.get("metatags", [])
+                if metatags:
+                    raw_date = (
+                        metatags[0].get("article:published_time", "") or
+                        metatags[0].get("article:modified_time", "") or
+                        metatags[0].get("og:updated_time", "") or
+                        metatags[0].get("og:article:published_time", "") or
+                        metatags[0].get("date", "") or
+                        metatags[0].get("datePublished", "") or
+                        metatags[0].get("pubdate", "")
+                    )
+                    if raw_date:
+                        pub_date = raw_date[:10]
+
+                # 2. Try newsarticle / article pagemap
+                if not pub_date:
+                    for key in ("newsarticle", "article"):
+                        entries = pagemap.get(key, [])
+                        if entries:
+                            raw_date = entries[0].get("datepublished", "") or entries[0].get("datemodified", "")
+                            if raw_date:
+                                pub_date = raw_date[:10]
+                                break
+
+                # 3. Try to extract date from snippet (Google often prepends "MMM DD, YYYY — ")
+                if not pub_date:
+                    snippet = item.get("snippet", "")
+                    import re as _re
+                    m = _re.match(r"([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})", snippet)
+                    if m:
+                        try:
+                            from datetime import datetime as _dt
+                            pub_date = _dt.strptime(m.group(1), "%b %d, %Y").strftime("%Y-%m-%d")
+                        except ValueError:
+                            pass
+                articles.append({
+                    "title": title,
+                    "snippet": item.get("snippet", ""),
+                    "link": item.get("link", ""),
+                    "source": "Google",
+                    "date": pub_date,
+                })
+        logger.info(f"Google CSE: found {len(articles)} articles for {ticker}")
+        return articles
+
+    except Exception as e:
+        logger.error(f"Google CSE error for {ticker}: {e}")
+        return []
+
+
+def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None):
+    """Search news from all available sources and merge results.
+
+    Priority: Yahoo Finance (always) → NewsAPI (if configured) → Google CSE (if configured)
+    Returns up to 10 deduplicated articles.
+    """
+    all_articles = []
+
+    # 1. Yahoo Finance — always available (uses ticker directly, not text query)
+    all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
+
+    # 2. NewsAPI — optional
+    if NEWS_API_KEY:
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
+
+    # 3. Google CSE — optional
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
+
+    # Deduplicate by title
+    seen_titles = set()
+    unique = []
+    for a in all_articles:
+        t = a["title"].strip()
+        if t and t not in seen_titles:
+            seen_titles.add(t)
+            unique.append(a)
+
+    # Filter by date: keep only articles from target_date or later.
+    # Articles with no date field are kept (date unknown).
+    # If all articles are older than target_date, return empty → "개별이슈 미발견"
+    if target_date:
+        date_threshold = str(target_date)
+        date_filtered = [
+            a for a in unique
+            if not a.get("date") or a["date"] >= date_threshold
+        ]
+        logger.info(
+            f"Date filter ({date_threshold}): {len(unique)} → {len(date_filtered)} articles for {ticker}"
+        )
+        unique = date_filtered
+
+    logger.info(f"Total unique articles for {ticker}: {len(unique)}")
+    return unique[:10]
+
+
+def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_templates=None):
+    """Use Gemini to analyze stock price movement using customizable prompt templates.
+
+    Template variables: {name}, {ticker}, {change_pct}, {trade_date}
+    Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
+    """
     if not GEMINI_API_KEY:
         return "Gemini API key not configured."
 
@@ -329,353 +1353,199 @@ def analyze_with_gemini(ticker, stock_info):
     if not client:
         return "Gemini client initialization failed."
 
+    if model is None:
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+
     name = stock_info.get("name", ticker)
     change_pct = stock_info["change_pct"]
     trade_date = stock_info.get("date", "")
 
-    prompt = f"""You are a stock market analyst. Analyze the following stock's price movement and explain the likely cause.
+    templates = prompt_templates or {}
 
-Stock: {name} ({ticker})
-Change: {change_pct:+.1f}%
-Date: {trade_date}
+    if not articles:
+        # No articles from the analysis date → no speculation, return directly
+        return "개별이슈 미발견."
 
-Instructions:
-1. 출력은 한글로 해라.
-2. 한글로 1-2문장으로 간결하게 원인을 분석해라. (명사형 종결)
-3. 종목명이나 변동률은 출력하지 마라.
-4. 개별 이슈가 없으면: "개별이슈 미발견. 시장 전반적인 흐름에 따른 변동으로 추정."
-5. 예시: "AI 반도체 수요 증가에 대한 기대감으로 상승" 또는 "실적 발표 후 가이던스 하향으로 하락"
-6. 한글 분석 후 영어로 한 문장 요약 추가.
-"""
+    sources_used = list(set(a.get("source", "") for a in articles if a.get("source")))
+    sources_label = ", ".join(sources_used) if sources_used else "외부 검색"
+    articles_text = "\n".join([
+        f"  [{i+1}] [{a.get('source', '')}] {a['title']}" +
+        (f"\n      {a['snippet']}" if a.get('snippet') else "")
+        for i, a in enumerate(articles[:8])
+    ])
+    tmpl = templates.get("with_articles") or DEFAULT_PROMPT_WITH_ARTICLES
+    prompt = apply_template(
+        tmpl,
+        name=name,
+        ticker=ticker,
+        change_pct=f"{change_pct:+.1f}",
+        trade_date=trade_date,
+        articles_text=articles_text,
+        sources_label=sources_label,
+        articles_count=len(articles),
+    )
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-pro",
+            model=model,
             contents=prompt,
         )
         return response.text
     except Exception as e:
-        return f"Analysis failed: {str(e)}"
+        return f"분석 실패: {str(e)}"
 
 
-# ─── Global Indices ───────────────────────────────────────────────────────────
+# ─── Scheduled / Webhook Analysis ────────────────────────────────────────────
 
-GLOBAL_INDICES = {
-    "미국": [
-        {"symbol": "^DJI",  "name": "다우존스 (DOW)"},
-        {"symbol": "^IXIC", "name": "나스닥 (NASDAQ)"},
-        {"symbol": "^GSPC", "name": "S&P 500"},
-        {"symbol": "^SOX",  "name": "필라델피아 반도체 (SOX)"},
-    ],
-    "아시아": [
-        {"symbol": "^KS11",     "name": "KOSPI"},
-        {"symbol": "^KQ11",     "name": "KOSDAQ"},
-        {"symbol": "000001.SS", "name": "상해종합 (Shanghai)"},
-        {"symbol": "^HSI",      "name": "항셍 (Hang Seng)"},
-        {"symbol": "^N225",     "name": "니케이 (Nikkei 225)"},
-    ],
-    "유럽": [
-        {"symbol": "^FTSE",  "name": "영국 FTSE 100"},
-        {"symbol": "^FCHI",  "name": "프랑스 CAC 40"},
-        {"symbol": "^GDAXI", "name": "독일 DAX"},
-    ],
-}
-
-
-def fetch_index_data(symbol, name, target_date=None):
-    """Fetch a single index's price data from Yahoo Finance.
-
-    target_date: 'YYYY-MM-DD' string.  When given, find the candle whose
-    exchange-local date matches target_date and calculate change vs the
-    previous trading day.  When None, use the most recent candle.
-    """
+def run_scheduled_analysis(target_date=None):
+    """비스트리밍 전체 분석 실행 후 이메일 발송. 웹훅에서 호출."""
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-        # Fetch enough history to cover a target date + prior trading day.
-        # For a specific date we use a 10-day window; otherwise 5d suffices.
-        params = {"range": "10d" if target_date else "5d", "interval": "1d"}
-        resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
+        logger.info("Scheduled analysis started")
+        if target_date is None:
+            target_date = get_kst_today()
 
-        if resp.status_code != 200:
-            return {"symbol": symbol, "name": name, "error": f"HTTP {resp.status_code}"}
-
-        data = resp.json()
-        result = data["chart"]["result"][0]
-        meta   = result["meta"]
-        closes = result["indicators"]["quote"][0]["close"]
-        timestamps = result["timestamp"]
-
-        # Resolve exchange timezone
-        tz_name = meta.get("exchangeTimezoneName", "UTC")
-        try:
-            tz = ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError:
-            tz = timezone.utc
-
-        # Build list of (local_date_str, ts, close) for valid candles
-        valid = []
-        for ts, c in zip(timestamps, closes):
-            if c is None:
-                continue
-            local_date = datetime.fromtimestamp(ts, tz=tz).strftime("%Y-%m-%d")
-            valid.append((local_date, ts, c))
-
-        if len(valid) < 2:
-            return {"symbol": symbol, "name": name, "error": "데이터 부족"}
-
-        if target_date:
-            # Find the index of the candle matching target_date (exchange local)
-            target_idx = next(
-                (i for i, (d, _, _) in enumerate(valid) if d == target_date), None
-            )
-            if target_idx is None:
-                return {"symbol": symbol, "name": name,
-                        "error": f"현지 {target_date} 거래 데이터 없음 (휴장일 가능성)"}
-            if target_idx == 0:
-                return {"symbol": symbol, "name": name,
-                        "error": f"현지 {target_date} 이전 거래일 데이터 부족"}
-            last_date, _, last_close   = valid[target_idx]
-            _,         _, prev_close   = valid[target_idx - 1]
-        else:
-            last_date, _, last_close = valid[-1]
-            _,         _, prev_close = valid[-2]
-
-        change = last_close - prev_close
-        change_pct = (change / prev_close) * 100
-
-        return {
-            "symbol": symbol,
-            "name": name,
-            "value": round(float(last_close), 2),
-            "change": round(float(change), 2),
-            "change_pct": round(float(change_pct), 2),
-            "date": last_date,
-            "timezone": tz_name,
+        settings = load_settings()
+        model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
+        change_threshold = float(settings.get("change_threshold", 5.0))
+        custom_query = settings.get("custom_query", "")
+        prompt_templates = {
+            "with_articles": settings.get("prompt_with_articles") or DEFAULT_PROMPT_WITH_ARTICLES,
+            "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
         }
-    except Exception as e:
-        return {"symbol": symbol, "name": name, "error": str(e)}
 
+        # Phase 0: 글로벌 지수
+        logger.info("Fetching market indices...")
+        indices_data = fetch_all_market_indices(target_date)
+        trade_date_str = next((i["date"] for i in indices_data if i.get("date")), str(target_date))
+        articles_by_region = {}
+        for region in MARKET_NEWS_REGIONS:
+            arts = search_market_news_for_region(region, trade_date_str, target_date)
+            if arts:
+                articles_by_region[region] = arts
+        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+        market_data = {"indices": indices_data, "analysis": market_analysis, "date": trade_date_str}
+        gc.collect()
 
-def get_indices_news_summary(indices_data):
-    """Use Gemini to generate news & market analysis for global indices."""
-    if not GEMINI_API_KEY:
-        return "Gemini API key가 설정되지 않았습니다."
+        # Phase 1: 종목 데이터 수집 + 필터링
+        logger.info("Fetching ticker data...")
+        ticker_objects = load_tickers_from_csv()
+        ticker_meta = {t["ticker"]: t for t in ticker_objects}
+        filtered_list = []
+        for t in ticker_objects:
+            result = fetch_single_ticker(t["ticker"], target_date=target_date)
+            if abs(result.get("change_pct", 0)) >= change_threshold:
+                filtered_list.append((t["ticker"], result))
+        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+        logger.info(f"Filtered {len(filtered_list)} tickers above threshold {change_threshold}%")
+        gc.collect()
 
-    client = get_gemini_client()
-    if not client:
-        return "Gemini 클라이언트 초기화 실패."
-
-    context_lines = []
-    # Collect representative local date per region (from first valid index)
-    region_dates = {}
-    for region, indices in indices_data.items():
-        context_lines.append(f"\n[{region}]")
-        for idx in indices:
-            if "error" not in idx:
-                sign = "+" if idx["change_pct"] >= 0 else ""
-                context_lines.append(
-                    f"  - {idx['name']}: {idx['value']:,.2f} ({sign}{idx['change_pct']:.2f}%) [{idx['date']} 기준]"
+        # Phase 2: 종목별 뉴스 + Gemini 분석
+        results = []
+        for ticker, info in filtered_list:
+            try:
+                articles = search_all_news_articles(
+                    ticker, info.get("name", ticker), info.get("date", ""),
+                    target_date=target_date, custom_query=custom_query,
                 )
-                if region not in region_dates:
-                    region_dates[region] = idx["date"]
-            else:
-                context_lines.append(f"  - {idx['name']}: 데이터 오류")
+                analysis = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
+                meta = ticker_meta.get(ticker, {})
+                results.append({
+                    "ticker": ticker,
+                    "name": info.get("name", ticker) or meta.get("name", ticker),
+                    "change_pct": info["change_pct"],
+                    "analysis": analysis,
+                    "articles_found": len(articles) > 0,
+                    "articles_count": len(articles),
+                    "articles_sources": list(set(a.get("source", "") for a in articles if a.get("source"))),
+                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in articles[:5]],
+                    "model_used": model,
+                })
+            except Exception as e:
+                logger.error(f"Scheduled analysis error for {ticker}: {e}")
+            gc.collect()
 
-    context = "\n".join(context_lines)
-    date_info = " | ".join(f"{r}: {d}" for r, d in region_dates.items())
-    today = date_info if date_info else datetime.now().strftime("%Y-%m-%d")
+        # Phase 3: 이메일 전송
+        date_str = str(target_date)
+        html_body = build_email_html(results, date_str, market_data=market_data)
+        all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
+        if not all_recipients:
+            logger.warning("Scheduled analysis: no recipients configured, skipping email")
+            return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
 
-    prompt = f"""당신은 글로벌 금융 시장 전문 애널리스트입니다.
-각 지역별 현지 기준 날짜: {today}
-
-아래는 주요 글로벌 주가 지수 현황입니다 (각 수치는 해당 거래소의 현지 날짜 기준):
-{context}
-
-위 지수들의 움직임을 분석하고, 각 지역별 주요 이슈와 뉴스를 한글로 정리해주세요.
-
-출력 형식 (마크다운):
-## 미국 시장
-- 핵심 이슈 2-3가지 (지수 움직임 원인, 최신 경제 이벤트/정책/실적 기반)
-
-## 아시아 시장
-- 핵심 이슈 2-3가지
-
-## 유럽 시장
-- 핵심 이슈 2-3가지
-
-## 종합 시장 분위기
-1-2문장으로 전체 시장 분위기 요약.
-
-각 이슈는 구체적 근거(연준 정책, 환율, 무역, 실적 시즌 등)를 포함하고 간결하게 작성하세요.
-"""
-
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        return f"뉴스 분석 실패: {str(e)}"
-
-
-@app.route("/api/indices/stream", methods=["GET"])
-def indices_stream():
-    """SSE endpoint: fetch global index prices then Gemini news summary."""
-    target_date = request.args.get("date") or None  # 'YYYY-MM-DD' or None
-
-    def generate():
-        label = f"{target_date} 현지 기준 " if target_date else ""
-        yield f"data: {json.dumps({'type': 'progress', 'message': f'{label}글로벌 지수 데이터 수집 중...'})}\n\n"
-
-        all_indices_data = {}
-        for region, indices in GLOBAL_INDICES.items():
-            region_data = []
-            for idx in indices:
-                result = fetch_index_data(idx["symbol"], idx["name"], target_date)
-                region_data.append(result)
-            all_indices_data[region] = region_data
-
-        yield f"data: {json.dumps({'type': 'indices', 'data': all_indices_data})}\n\n"
-
-        yield f"data: {json.dumps({'type': 'progress', 'message': 'Gemini로 뉴스 & 시장 분석 중...'})}\n\n"
-
-        news_summary = get_indices_news_summary(all_indices_data)
-        yield f"data: {json.dumps({'type': 'news', 'summary': news_summary})}\n\n"
-
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream")
-
-
-# ─── Email ────────────────────────────────────────────────────────────────────
-
-def build_email_html(indices_data, news_summary, report_date):
-    """Build HTML email body from indices data and news summary."""
-
-    def change_color(pct):
-        if pct > 0:
-            return "#22c55e"
-        if pct < 0:
-            return "#ef4444"
-        return "#94a3b8"
-
-    region_icons = {"미국": "🇺🇸", "아시아": "🌏", "유럽": "🇪🇺"}
-
-    rows_html = ""
-    for region, indices in indices_data.items():
-        icon = region_icons.get(region, "")
-        rows_html += f"""
-        <tr><td colspan="3" style="padding:12px 16px 6px;font-size:0.8rem;font-weight:700;
-            color:#94a3b8;background:#0f1923;border-bottom:1px solid #2a3a4a;">
-            {icon} {region}
-        </td></tr>"""
-        for idx in indices:
-            if "error" in idx:
-                rows_html += f"""
-                <tr><td style="padding:8px 16px;color:#94a3b8;">{idx['name']}</td>
-                <td colspan="2" style="color:#ef4444;font-size:0.8rem;">데이터 오류</td></tr>"""
-                continue
-            sign = "+" if idx["change_pct"] >= 0 else ""
-            color = change_color(idx["change_pct"])
-            val = f"{idx['value']:,.2f}"
-            rows_html += f"""
-            <tr style="border-bottom:1px solid #1e2f3f;">
-                <td style="padding:8px 16px;color:#e0e6ed;font-size:0.88rem;">{idx['name']}</td>
-                <td style="padding:8px 16px;color:#e0e6ed;font-weight:700;font-size:0.88rem;
-                    text-align:right;">{val}</td>
-                <td style="padding:8px 16px;color:{color};font-weight:700;font-size:0.88rem;
-                    text-align:right;">{sign}{idx['change_pct']:.2f}%</td>
-            </tr>"""
-
-    # Convert markdown news to simple HTML paragraphs
-    news_html = ""
-    for line in news_summary.split("\n"):
-        t = line.strip()
-        if not t:
-            continue
-        if t.startswith("## "):
-            news_html += f'<h3 style="color:#818cf8;font-size:0.95rem;margin:16px 0 6px;padding-left:10px;border-left:3px solid #6366f1;">{t[3:]}</h3>'
-        elif t.startswith("- "):
-            news_html += f'<p style="color:#94a3b8;font-size:0.88rem;margin:4px 0 4px 14px;">• {t[2:]}</p>'
-        else:
-            news_html += f'<p style="color:#b0c4de;font-size:0.88rem;margin:6px 0;">{t}</p>'
-
-    return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#0f1923;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:640px;margin:32px auto;background:#1a2634;border:1px solid #2a3a4a;border-radius:12px;overflow:hidden;">
-    <div style="padding:24px 28px;background:#0f1923;border-bottom:1px solid #2a3a4a;">
-      <h1 style="margin:0;color:#fff;font-size:1.2rem;">글로벌 주요 지수 리포트</h1>
-      <p style="margin:4px 0 0;color:#5a6a7a;font-size:0.82rem;">{report_date} 기준</p>
-    </div>
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-      <thead>
-        <tr style="background:#253547;">
-          <th style="padding:8px 16px;text-align:left;color:#7a8a9e;font-size:0.78rem;font-weight:600;">지수</th>
-          <th style="padding:8px 16px;text-align:right;color:#7a8a9e;font-size:0.78rem;font-weight:600;">현재가</th>
-          <th style="padding:8px 16px;text-align:right;color:#7a8a9e;font-size:0.78rem;font-weight:600;">등락률</th>
-        </tr>
-      </thead>
-      <tbody>{rows_html}</tbody>
-    </table>
-    <div style="padding:20px 28px;border-top:1px solid #2a3a4a;">
-      <h2 style="color:#c8d6e5;font-size:0.95rem;margin:0 0 12px;">뉴스 &amp; 시장 분석
-        <span style="font-size:0.7rem;background:rgba(99,102,241,0.2);color:#818cf8;
-          padding:2px 8px;border-radius:10px;margin-left:8px;font-weight:500;">Gemini 2.5 Pro</span>
-      </h2>
-      {news_html}
-    </div>
-    <div style="padding:14px 28px;background:#0f1923;border-top:1px solid #2a3a4a;
-        text-align:center;color:#3a4a5a;font-size:0.75rem;">
-      Stock Movement Analyzer · 자동 발송 리포트
-    </div>
-  </div>
-</body></html>"""
-
-
-@app.route("/api/send-email", methods=["POST"])
-def send_email():
-    """Send indices report email."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        return jsonify({"error": "SMTP 설정이 없습니다. 환경변수(SMTP_USER, SMTP_PASSWORD)를 확인하세요."}), 400
-
-    data = request.get_json()
-    to_emails    = data.get("to_emails", [])
-    indices_data = data.get("indices_data", {})
-    news_summary = data.get("news_summary", "")
-    report_date  = data.get("report_date", datetime.now().strftime("%Y-%m-%d"))
-
-    if not to_emails:
-        return jsonify({"error": "수신자를 추가해주세요."}), 400
-
-    try:
-        html_body = build_email_html(indices_data, news_summary, report_date)
-
+        subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {date_str}"
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[주식 리포트] 글로벌 주요 지수 현황 ({report_date})"
-        msg["From"]    = SMTP_USER
-        msg["To"]      = ", ".join(to_emails)
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_FROM
+        msg["To"] = ", ".join(all_recipients)
         msg.attach(MIMEText(html_body, "html", "utf-8"))
-
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, to_emails, msg.as_string())
+            server.sendmail(SMTP_USER, all_recipients, msg.as_string())
 
-        count = len(to_emails)
-        label = to_emails[0] if count == 1 else f"{to_emails[0]} 외 {count - 1}명"
-        logger.info(f"Email sent to {to_emails}")
-        return jsonify({"message": f"{label}에게 발송 완료!"})
+        logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
+        return {"status": "done", "sent": True, "recipients": all_recipients, "results_count": len(results), "date": date_str}
 
-    except smtplib.SMTPAuthenticationError:
-        return jsonify({"error": "SMTP 인증 실패. 계정/비밀번호를 확인하세요."}), 500
-    except smtplib.SMTPException as e:
-        return jsonify({"error": f"SMTP 오류: {str(e)}"}), 500
     except Exception as e:
-        logger.error(f"Email send failed: {e}")
-        return jsonify({"error": f"발송 실패: {str(e)}"}), 500
+        logger.error(f"Scheduled analysis failed: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+def _get_or_create_webhook_token():
+    """settings.json에 웹훅 토큰이 없으면 생성해서 저장."""
+    settings = load_settings()
+    token = settings.get("webhook_token", "")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        settings["webhook_token"] = token
+        save_settings(settings)
+    return token
+
+
+@app.route("/api/webhook/info", methods=["GET"])
+def webhook_info():
+    """웹훅 토큰 및 사용 방법 안내."""
+    token = _get_or_create_webhook_token()
+    return jsonify({
+        "token": token,
+        "endpoint": "/api/webhook/run-analysis",
+        "method": "POST",
+        "header": f"X-Webhook-Token: {token}",
+        "note": "Google Cloud Scheduler: POST to <your-url>/api/webhook/run-analysis with header X-Webhook-Token",
+    })
+
+
+@app.route("/api/webhook/token/regenerate", methods=["POST"])
+def regenerate_webhook_token():
+    """토큰 재생성."""
+    settings = load_settings()
+    settings["webhook_token"] = secrets.token_urlsafe(32)
+    save_settings(settings)
+    return jsonify({"token": settings["webhook_token"]})
+
+
+@app.route("/api/webhook/run-analysis", methods=["POST"])
+def webhook_run_analysis():
+    """외부 스케줄러(Google Cloud Scheduler 등)에서 호출하는 웹훅 엔드포인트."""
+    # 토큰 인증
+    token = _get_or_create_webhook_token()
+    req_token = request.headers.get("X-Webhook-Token") or request.args.get("token", "")
+    if not secrets.compare_digest(req_token, token):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # 날짜 파라미터 (없으면 오늘 KST)
+    date_str = request.args.get("date", "") or (request.get_json(silent=True) or {}).get("date", "")
+    target_date = None
+    if date_str:
+        try:
+            target_date = date_cls.fromisoformat(date_str)
+        except ValueError:
+            pass
+
+    result = run_scheduled_analysis(target_date=target_date)
+    return jsonify(result)
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
