@@ -199,9 +199,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function getKstYesterdayString() {
-        // Yesterday in KST
+        // Last trading weekday in KST (skip Sunday=0, Saturday=6)
         const now = new Date();
-        const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000 - 24 * 60 * 60 * 1000);
+        const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        kst.setUTCDate(kst.getUTCDate() - 1); // go to yesterday
+        const dow = kst.getUTCDay();
+        if (dow === 0) {       // Sunday → go back to Friday
+            kst.setUTCDate(kst.getUTCDate() - 2);
+        } else if (dow === 6) { // Saturday → go back to Friday
+            kst.setUTCDate(kst.getUTCDate() - 1);
+        }
         return kst.toISOString().slice(0, 10);
     }
 
@@ -798,9 +805,10 @@ document.addEventListener("DOMContentLoaded", () => {
                             analyzeBtn.disabled = false;
                             if (stopBtn) stopBtn.style.display = "none";
 
-                            // Show send email button if results exist
+                            // Auto-send email and show button if results exist
                             if (sendEmailBtn && currentResults.length > 0) {
                                 sendEmailBtn.style.display = "inline-flex";
+                                sendEmailReport();
                             }
 
                             if (currentResults.length === 0 && data.message) {
