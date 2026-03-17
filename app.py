@@ -810,7 +810,7 @@ def analyze_stream():
             yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
 
             for ticker in batch:
-                result = fetch_single_ticker(ticker, target_date=target_date)
+                result = fetch_single_ticker(ticker, target_date=target_date, tz_offset=get_ticker_tz_offset(ticker))
                 meta = ticker_meta.get(ticker, {})
                 all_stocks_slim[ticker] = {
                     "name": result.get("name") or meta.get("name") or ticker,
@@ -946,6 +946,28 @@ def analyze():
 YAHOO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
+
+
+def get_ticker_tz_offset(ticker):
+    """Infer exchange UTC offset (hours) from ticker suffix.
+
+    Used so that each market's daily bar is compared against the correct
+    calendar date in the exchange's local timezone.
+    """
+    t = ticker.upper()
+    if t.endswith(".KS") or t.endswith(".KQ"):
+        return 9   # Korea (KST = UTC+9)
+    if t.endswith(".T"):
+        return 9   # Japan (JST = UTC+9)
+    if t.endswith(".SS") or t.endswith(".SZ"):
+        return 8   # China mainland (CST = UTC+8)
+    if t.endswith(".HK"):
+        return 8   # Hong Kong (HKT = UTC+8)
+    if t.endswith(".L"):
+        return 0   # UK (GMT = UTC+0)
+    if t.endswith((".PA", ".DE", ".AS", ".BR", ".MC", ".MI", ".VI")):
+        return 1   # Europe (CET = UTC+1)
+    return -5      # Default: US (EST = UTC-5)
 
 
 def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
@@ -1206,8 +1228,14 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_
             "apiKey": NEWS_API_KEY,
         }
         if target_date:
-            params["from"] = str(target_date)
-            params["to"] = str(target_date + timedelta(days=1))
+            # Start from midnight KST (= target_date 00:00 KST = target_date-1 15:00 UTC)
+            # so articles published from the very start of the day in Korea are included.
+            from_kst = datetime(target_date.year, target_date.month, target_date.day,
+                                0, 0, 0, tzinfo=KST)
+            from_utc = from_kst.astimezone(timezone.utc)
+            to_utc = from_utc + timedelta(hours=24)
+            params["from"] = from_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            params["to"] = to_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code != 200:
@@ -1462,7 +1490,7 @@ def run_scheduled_analysis(target_date=None):
         ticker_meta = {t["ticker"]: t for t in ticker_objects}
         filtered_list = []
         for t in ticker_objects:
-            result = fetch_single_ticker(t["ticker"], target_date=target_date)
+            result = fetch_single_ticker(t["ticker"], target_date=target_date, tz_offset=get_ticker_tz_offset(t["ticker"]))
             if abs(result.get("change_pct", 0)) >= change_threshold:
                 filtered_list.append((t["ticker"], result))
         filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
