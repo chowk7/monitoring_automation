@@ -169,17 +169,17 @@ DEFAULT_TICKERS = [
 
 # Global market indices
 MARKET_INDICES = [
-    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국"},
-    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국"},
-    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국"},
-    {"ticker": "^KS11",     "name": "코스피",    "region": "한국"},
-    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국"},
-    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국"},
-    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩"},
-    {"ticker": "^N225",     "name": "닛케이225", "region": "일본"},
-    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국"},
-    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스"},
-    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일"},
+    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국",   "tz_hours":  0},
+    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국",   "tz_hours":  0},
+    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국",   "tz_hours":  0},
+    {"ticker": "^KS11",     "name": "코스피",    "region": "한국",   "tz_hours":  9},
+    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국",   "tz_hours":  9},
+    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국",   "tz_hours":  8},
+    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩",   "tz_hours":  8},
+    {"ticker": "^N225",     "name": "닛케이225", "region": "일본",   "tz_hours":  9},
+    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국",   "tz_hours":  0},
+    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스", "tz_hours":  1},
+    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일",   "tz_hours":  1},
 ]
 
 # Region → ticker mapping for market news search
@@ -946,12 +946,29 @@ YAHOO_HEADERS = {
 }
 
 
-def fetch_single_ticker(ticker_symbol, target_date=None):
+def ticker_tz_hours(ticker):
+    """Return UTC offset (hours) for a ticker based on its exchange suffix."""
+    t = ticker.upper()
+    if t.endswith((".KS", ".KQ")) or t in ("^KS11", "^KQ11"):
+        return 9   # KST
+    if t.endswith(".T") or t == "^N225":
+        return 9   # JST
+    if t.endswith((".SS", ".SZ")) or t == "000001.SS":
+        return 8   # CST
+    if t.endswith(".HK") or t == "^HSI":
+        return 8   # HKT
+    return 0       # UTC (US, Europe 등)
+
+
+def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
     """Fetch a single ticker's data from Yahoo Finance API.
 
-    If target_date is provided, returns data for that calendar date.
-    Uses the most recent bar on or before target_date (UTC date).
+    tz_hours: UTC offset of the exchange (e.g. 9 for KST/JST, 8 for CST/HKT).
+    Bar dates are evaluated in local time so 3/16 always means 3/16 locally.
+    If None, auto-detected from ticker suffix.
     """
+    if tz_hours is None:
+        tz_hours = ticker_tz_hours(ticker_symbol)
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
 
@@ -987,14 +1004,13 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         timestamps = result["timestamp"]
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+        tz_secs = tz_hours * 3600
 
         if target_date:
-            # Keep bars whose UTC date is on or before target_date.
-            # Yahoo Finance daily bar timestamps fall within the trading day
-            # (UTC), so UTC date comparison correctly identifies the bar for
-            # any region without timezone conversion.
+            # Convert each bar's UTC timestamp to local exchange date by adding
+            # tz_hours offset, then compare against target_date.
             filtered = [(ts, c) for ts, c in valid
-                        if datetime.fromtimestamp(ts, tz=timezone.utc).date() <= target_date]
+                        if datetime.utcfromtimestamp(ts + tz_secs).date() <= target_date]
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1008,7 +1024,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0], tz=timezone.utc).date()
+        last_date = datetime.utcfromtimestamp(valid[-1][0] + tz_secs).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
@@ -1028,7 +1044,7 @@ def fetch_all_market_indices(target_date=None):
     """Fetch all global market indices data."""
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_hours=idx.get("tz_hours", 0))
         results.append({
             "ticker": idx["ticker"],
             "name": idx["name"],
