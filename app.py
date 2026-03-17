@@ -1566,12 +1566,6 @@ def regenerate_webhook_token():
 @app.route("/api/webhook/run-analysis", methods=["POST"])
 def webhook_run_analysis():
     """외부 스케줄러(Google Cloud Scheduler 등)에서 호출하는 웹훅 엔드포인트."""
-    # 토큰 인증
-    token = _get_or_create_webhook_token()
-    req_token = request.headers.get("X-Webhook-Token") or request.args.get("token", "")
-    if not secrets.compare_digest(req_token, token):
-        return jsonify({"error": "Unauthorized"}), 401
-
     # 날짜 파라미터 (없으면 오늘 KST)
     date_str = request.args.get("date", "") or (request.get_json(silent=True) or {}).get("date", "")
     target_date = None
