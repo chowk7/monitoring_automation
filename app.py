@@ -1004,13 +1004,14 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         timestamps = result["timestamp"]
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
-        tz_secs = tz_hours * 3600
 
         if target_date:
-            # Convert each bar's UTC timestamp to local exchange date by adding
-            # tz_hours offset, then compare against target_date.
+            # Yahoo Finance timestamps Asian daily bars at UTC times that are <= the
+            # local trading date (e.g. 3/16 15:00 UTC for a 3/16 KST bar).
+            # Adding tz_hours pushes the time past midnight → wrong date.
+            # UTC date comparison is correct for all regions.
             filtered = [(ts, c) for ts, c in valid
-                        if datetime.utcfromtimestamp(ts + tz_secs).date() <= target_date]
+                        if datetime.utcfromtimestamp(ts).date() <= target_date]
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1024,7 +1025,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.utcfromtimestamp(valid[-1][0] + tz_secs).date()
+        last_date = datetime.utcfromtimestamp(valid[-1][0]).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
