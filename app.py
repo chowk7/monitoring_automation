@@ -168,20 +168,18 @@ DEFAULT_TICKERS = [
 ]
 
 # Global market indices
-# tz_offset: exchange local timezone offset from UTC (hours), used to determine
-# the local trading date from Yahoo Finance bar timestamps.
 MARKET_INDICES = [
-    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국",   "tz_offset": -5},
-    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국",   "tz_offset": -5},
-    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국",   "tz_offset": -5},
-    {"ticker": "^KS11",     "name": "코스피",    "region": "한국",   "tz_offset": 9},
-    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국",   "tz_offset": 9},
-    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국",   "tz_offset": 8},
-    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩",   "tz_offset": 8},
-    {"ticker": "^N225",     "name": "닛케이225", "region": "일본",   "tz_offset": 9},
-    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국",   "tz_offset": 0},
-    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스", "tz_offset": 1},
-    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일",   "tz_offset": 1},
+    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국"},
+    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국"},
+    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국"},
+    {"ticker": "^KS11",     "name": "코스피",    "region": "한국"},
+    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국"},
+    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국"},
+    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩"},
+    {"ticker": "^N225",     "name": "닛케이225", "region": "일본"},
+    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국"},
+    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스"},
+    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일"},
 ]
 
 # Region → ticker mapping for market news search
@@ -810,7 +808,7 @@ def analyze_stream():
             yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
 
             for ticker in batch:
-                result = fetch_single_ticker(ticker, target_date=target_date, tz_offset=get_ticker_tz_offset(ticker))
+                result = fetch_single_ticker(ticker, target_date=target_date)
                 meta = ticker_meta.get(ticker, {})
                 all_stocks_slim[ticker] = {
                     "name": result.get("name") or meta.get("name") or ticker,
@@ -948,33 +946,11 @@ YAHOO_HEADERS = {
 }
 
 
-def get_ticker_tz_offset(ticker):
-    """Infer exchange UTC offset (hours) from ticker suffix.
-
-    Used so that each market's daily bar is compared against the correct
-    calendar date in the exchange's local timezone.
-    """
-    t = ticker.upper()
-    if t.endswith(".KS") or t.endswith(".KQ"):
-        return 9   # Korea (KST = UTC+9)
-    if t.endswith(".T"):
-        return 9   # Japan (JST = UTC+9)
-    if t.endswith(".SS") or t.endswith(".SZ"):
-        return 8   # China mainland (CST = UTC+8)
-    if t.endswith(".HK"):
-        return 8   # Hong Kong (HKT = UTC+8)
-    if t.endswith(".L"):
-        return 0   # UK (GMT = UTC+0)
-    if t.endswith((".PA", ".DE", ".AS", ".BR", ".MC", ".MI", ".VI")):
-        return 1   # Europe (CET = UTC+1)
-    return -5      # Default: US (EST = UTC-5)
-
-
-def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
+def fetch_single_ticker(ticker_symbol, target_date=None):
     """Fetch a single ticker's data from Yahoo Finance API.
 
-    If target_date is provided, returns data for that exchange-local trading day.
-    tz_offset: exchange local UTC offset in hours (e.g. -5 for NYSE, 9 for KRX).
+    If target_date is provided, returns data for that calendar date.
+    Uses the most recent bar on or before target_date (UTC date).
     """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
@@ -1010,23 +986,15 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
-        # Use Yahoo Finance's own gmtoffset (seconds) for the exchange timezone.
-        # This is more reliable than hardcoded tz_offset because:
-        #   1. It accounts for DST automatically (e.g. EDT vs EST)
-        #   2. Yahoo Finance bar timestamps are anchored to this offset,
-        #      so converting with it always yields the correct trading date.
-        # Fall back to tz_offset parameter if gmtoffset is absent.
-        gmt_offset_secs = meta.get("gmtoffset", tz_offset * 3600)
-        exchange_tz = timezone(timedelta(seconds=gmt_offset_secs))
-
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
         if target_date:
-            filtered = []
-            for ts, c in valid:
-                bar_date = datetime.fromtimestamp(ts, tz=exchange_tz).date()
-                if bar_date <= target_date:
-                    filtered.append((ts, c))
+            # Keep bars whose UTC date is on or before target_date.
+            # Yahoo Finance daily bar timestamps fall within the trading day
+            # (UTC), so UTC date comparison correctly identifies the bar for
+            # any region without timezone conversion.
+            filtered = [(ts, c) for ts, c in valid
+                        if datetime.fromtimestamp(ts, tz=timezone.utc).date() <= target_date]
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1040,7 +1008,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0], tz=exchange_tz).date()
+        last_date = datetime.fromtimestamp(valid[-1][0], tz=timezone.utc).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
@@ -1060,7 +1028,7 @@ def fetch_all_market_indices(target_date=None):
     """Fetch all global market indices data."""
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_offset=idx.get("tz_offset", 0))
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
         results.append({
             "ticker": idx["ticker"],
             "name": idx["name"],
@@ -1226,14 +1194,8 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_
             "apiKey": NEWS_API_KEY,
         }
         if target_date:
-            # Start from midnight KST (= target_date 00:00 KST = target_date-1 15:00 UTC)
-            # so articles published from the very start of the day in Korea are included.
-            from_kst = datetime(target_date.year, target_date.month, target_date.day,
-                                0, 0, 0, tzinfo=KST)
-            from_utc = from_kst.astimezone(timezone.utc)
-            to_utc = from_utc + timedelta(hours=24)
-            params["from"] = from_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-            params["to"] = to_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+            params["from"] = str(target_date)
+            params["to"] = str(target_date + timedelta(days=1))
 
         resp = requests.get(url, params=params, timeout=10)
         if resp.status_code != 200:
@@ -1488,7 +1450,7 @@ def run_scheduled_analysis(target_date=None):
         ticker_meta = {t["ticker"]: t for t in ticker_objects}
         filtered_list = []
         for t in ticker_objects:
-            result = fetch_single_ticker(t["ticker"], target_date=target_date, tz_offset=get_ticker_tz_offset(t["ticker"]))
+            result = fetch_single_ticker(t["ticker"], target_date=target_date)
             if abs(result.get("change_pct", 0)) >= change_threshold:
                 filtered_list.append((t["ticker"], result))
         filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
