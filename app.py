@@ -1010,21 +1010,22 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
+        # Use Yahoo Finance's own gmtoffset (seconds) for the exchange timezone.
+        # This is more reliable than hardcoded tz_offset because:
+        #   1. It accounts for DST automatically (e.g. EDT vs EST)
+        #   2. Yahoo Finance bar timestamps are anchored to this offset,
+        #      so converting with it always yields the correct trading date.
+        # Fall back to tz_offset parameter if gmtoffset is absent.
+        gmt_offset_secs = meta.get("gmtoffset", tz_offset * 3600)
+        exchange_tz = timezone(timedelta(seconds=gmt_offset_secs))
+
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
         if target_date:
-            # Filter to entries on or before target_date using the exchange's
-            # local date (tz_offset hours from UTC).  This ensures each market
-            # is evaluated against its own calendar date:
-            #   NYSE  (tz_offset=-5): 3/16 9:30 AM EST = 14:30 UTC → local 3/16
-            #   KRX   (tz_offset= 9): 3/16 9:00 AM KST =  0:00 UTC → local 3/16
-            #   LSE   (tz_offset= 0): 3/16 8:00 AM GMT =  8:00 UTC → local 3/16
             filtered = []
             for ts, c in valid:
-                local_date = (
-                    datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=tz_offset)
-                ).date()
-                if local_date <= target_date:
+                bar_date = datetime.fromtimestamp(ts, tz=exchange_tz).date()
+                if bar_date <= target_date:
                     filtered.append((ts, c))
             if len(filtered) >= 2:
                 valid = filtered
@@ -1039,10 +1040,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        # Report date in exchange local timezone
-        last_date = (
-            datetime.fromtimestamp(valid[-1][0], tz=timezone.utc) + timedelta(hours=tz_offset)
-        ).date()
+        last_date = datetime.fromtimestamp(valid[-1][0], tz=exchange_tz).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
