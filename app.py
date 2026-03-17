@@ -168,18 +168,20 @@ DEFAULT_TICKERS = [
 ]
 
 # Global market indices
+# tz_offset: exchange local timezone offset from UTC (hours), used to determine
+# the local trading date from Yahoo Finance bar timestamps.
 MARKET_INDICES = [
-    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국"},
-    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국"},
-    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국"},
-    {"ticker": "^KS11",     "name": "코스피",    "region": "한국"},
-    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국"},
-    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국"},
-    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩"},
-    {"ticker": "^N225",     "name": "닛케이225", "region": "일본"},
-    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국"},
-    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스"},
-    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일"},
+    {"ticker": "^DJI",      "name": "다우존스",  "region": "미국",   "tz_offset": -5},
+    {"ticker": "^IXIC",     "name": "나스닥",    "region": "미국",   "tz_offset": -5},
+    {"ticker": "^GSPC",     "name": "S&P 500",   "region": "미국",   "tz_offset": -5},
+    {"ticker": "^KS11",     "name": "코스피",    "region": "한국",   "tz_offset": 9},
+    {"ticker": "^KQ11",     "name": "코스닥",    "region": "한국",   "tz_offset": 9},
+    {"ticker": "000001.SS", "name": "상해종합",  "region": "중국",   "tz_offset": 8},
+    {"ticker": "^HSI",      "name": "항셍",      "region": "홍콩",   "tz_offset": 8},
+    {"ticker": "^N225",     "name": "닛케이225", "region": "일본",   "tz_offset": 9},
+    {"ticker": "^FTSE",     "name": "FTSE100",   "region": "영국",   "tz_offset": 0},
+    {"ticker": "^FCHI",     "name": "CAC40",     "region": "프랑스", "tz_offset": 1},
+    {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일",   "tz_offset": 1},
 ]
 
 # Region → ticker mapping for market news search
@@ -713,10 +715,11 @@ def get_market_indices():
 
     indices_data = fetch_all_market_indices(target_date)
     trade_date = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+    news_date_kst = str(target_date)  # News uses KST (user-selected date)
 
     articles_by_region = {}
     for region in MARKET_NEWS_REGIONS:
-        articles = search_market_news_for_region(region, trade_date, target_date)
+        articles = search_market_news_for_region(region, news_date_kst, target_date)
         if articles:
             articles_by_region[region] = articles
 
@@ -773,11 +776,14 @@ def analyze_stream():
         yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
         indices_data = fetch_all_market_indices(target_date)
         trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+        # News date uses KST (user-selected date) — the earliest timezone, so
+        # articles for all regions are most likely to be available.
+        news_date_kst = str(target_date)
 
         yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
         articles_by_region = {}
         for region in MARKET_NEWS_REGIONS:
-            arts = search_market_news_for_region(region, trade_date_for_market, target_date)
+            arts = search_market_news_for_region(region, news_date_kst, target_date)
             if arts:
                 articles_by_region[region] = arts
 
@@ -942,11 +948,11 @@ YAHOO_HEADERS = {
 }
 
 
-def fetch_single_ticker(ticker_symbol, target_date=None):
+def fetch_single_ticker(ticker_symbol, target_date=None, tz_offset=0):
     """Fetch a single ticker's data from Yahoo Finance API.
 
-    If target_date (date object, KST) is provided, returns data for that trading day.
-    Otherwise returns the most recent day's data.
+    If target_date is provided, returns data for that exchange-local trading day.
+    tz_offset: exchange local UTC offset in hours (e.g. -5 for NYSE, 9 for KRX).
     """
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
@@ -985,16 +991,18 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
         if target_date:
-            # Filter to entries on or before target_date using UTC date.
-            # Yahoo Finance daily bar timestamps are anchored at market-open in
-            # the exchange's local timezone (e.g. 9:30 AM EST = 14:30 UTC for
-            # NYSE).  Converting to KST shifts US dates forward by ~1 day, so
-            # a 3/16 NYSE bar would appear as 3/17 KST and get incorrectly
-            # excluded.  Comparing in UTC avoids this problem for all markets.
+            # Filter to entries on or before target_date using the exchange's
+            # local date (tz_offset hours from UTC).  This ensures each market
+            # is evaluated against its own calendar date:
+            #   NYSE  (tz_offset=-5): 3/16 9:30 AM EST = 14:30 UTC → local 3/16
+            #   KRX   (tz_offset= 9): 3/16 9:00 AM KST =  0:00 UTC → local 3/16
+            #   LSE   (tz_offset= 0): 3/16 8:00 AM GMT =  8:00 UTC → local 3/16
             filtered = []
             for ts, c in valid:
-                utc_date = datetime.fromtimestamp(ts, tz=timezone.utc).date()
-                if utc_date <= target_date:
+                local_date = (
+                    datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=tz_offset)
+                ).date()
+                if local_date <= target_date:
                     filtered.append((ts, c))
             if len(filtered) >= 2:
                 valid = filtered
@@ -1009,8 +1017,10 @@ def fetch_single_ticker(ticker_symbol, target_date=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        # Report date in UTC (consistent with the filter above)
-        last_date = datetime.fromtimestamp(valid[-1][0], tz=timezone.utc).date()
+        # Report date in exchange local timezone
+        last_date = (
+            datetime.fromtimestamp(valid[-1][0], tz=timezone.utc) + timedelta(hours=tz_offset)
+        ).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
@@ -1030,7 +1040,7 @@ def fetch_all_market_indices(target_date=None):
     """Fetch all global market indices data."""
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_offset=idx.get("tz_offset", 0))
         results.append({
             "ticker": idx["ticker"],
             "name": idx["name"],
@@ -1099,14 +1109,28 @@ def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=N
 {articles_text}
 
 Instructions:
-1. 미국·한국·중국/홍콩·일본·유럽 시장별로 등락 원인을 뉴스 근거로 1-2문장씩 간결하게 설명해라.
-2. 뉴스 근거가 없는 지역은 "정보 없음 / No data"으로 표시해라.
-3. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
-4. 마지막에 전체 시장 분위기를 1문장으로 요약해라.
-5. 각 문장을 한글로 먼저 쓰고, 바로 아래에 영문 번역을 함께 출력해라. 예시:
-   🇺🇸 미국: 고용지표 호조로 나스닥 상승.
-   🇺🇸 US: Nasdaq rose on strong jobs data.
-   (각 지역마다 동일하게 한글→영문 순서로)"""
+1. 아래 순서대로 각 지역을 반드시 빈 줄로 구분하여 출력해라:
+   1) 미국  2) 한국  3) 중국/홍콩  4) 일본  5) 유럽
+2. 각 지역 형식 (반드시 이 형식 준수):
+   🇺🇸 미국: <한글 분석 1-2문장>
+   🇺🇸 US: <English translation>
+
+   🇰🇷 한국: <한글 분석>
+   🇰🇷 Korea: <English>
+
+   🇨🇳 중국/홍콩: <한글 분석>
+   🇨🇳 China/HK: <English>
+
+   🇯🇵 일본: <한글 분석>
+   🇯🇵 Japan: <English>
+
+   🇪🇺 유럽: <한글 분석>
+   🇪🇺 Europe: <English>
+3. 뉴스 근거가 없는 지역은 해당 지역 아래에 "정보 없음 / No data"로 표시해라.
+4. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
+5. 마지막에 빈 줄 후 전체 시장 분위기를 1문장으로 요약 (한글/영문):
+   📊 요약: <한글>
+   📊 Summary: <English>"""
 
     try:
         response = client.models.generate_content(model=model, contents=prompt)
