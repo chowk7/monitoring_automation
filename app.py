@@ -20,6 +20,13 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# GCP Cloud Storage
+try:
+    from google.cloud import storage as gcs_storage
+    HAS_GCS = True
+except ImportError:
+    HAS_GCS = False
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -29,6 +36,65 @@ logger = logging.getLogger(__name__)
 # CSV file for ticker storage
 TICKERS_CSV_FILE = "tickers.csv"
 SETTINGS_FILE = "settings.json"
+
+# GCP Cloud Storage – set GCS_BUCKET_NAME env var to enable persistence
+GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
+
+
+def _gcs_bucket():
+    """Return (client, bucket) or (None, None) if GCS is unavailable."""
+    if not HAS_GCS or not GCS_BUCKET_NAME:
+        return None, None
+    try:
+        client = gcs_storage.Client()
+        return client, client.bucket(GCS_BUCKET_NAME)
+    except Exception as e:
+        logger.error(f"GCS client error: {e}")
+        return None, None
+
+
+def gcs_download(blob_name, dest_path):
+    """Download blob_name from GCS to dest_path. Returns True on success."""
+    _, bucket = _gcs_bucket()
+    if bucket is None:
+        return False
+    try:
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            logger.info(f"GCS: {blob_name} not found in bucket")
+            return False
+        blob.download_to_filename(dest_path)
+        logger.info(f"GCS: downloaded gs://{GCS_BUCKET_NAME}/{blob_name} -> {dest_path}")
+        return True
+    except Exception as e:
+        logger.error(f"GCS download error ({blob_name}): {e}")
+        return False
+
+
+def gcs_upload(src_path, blob_name):
+    """Upload src_path to GCS as blob_name. Returns True on success."""
+    _, bucket = _gcs_bucket()
+    if bucket is None:
+        return False
+    try:
+        blob = bucket.blob(blob_name)
+        blob.upload_from_filename(src_path)
+        logger.info(f"GCS: uploaded {src_path} -> gs://{GCS_BUCKET_NAME}/{blob_name}")
+        return True
+    except Exception as e:
+        logger.error(f"GCS upload error ({blob_name}): {e}")
+        return False
+
+
+def startup_sync_from_gcs():
+    """On app start, pull settings.json and tickers.csv from GCS (if configured)."""
+    if not GCS_BUCKET_NAME:
+        return
+    logger.info(f"GCS: syncing config from bucket '{GCS_BUCKET_NAME}'...")
+    gcs_download("settings.json", SETTINGS_FILE)
+    gcs_download("tickers.csv", TICKERS_CSV_FILE)
+    logger.info("GCS: startup sync complete")
+
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -328,6 +394,9 @@ def save_tickers_to_csv(ticker_list):
     except Exception as e:
         logger.error(f"Error writing CSV: {e}")
 
+
+# ─── GCS Startup Sync ─────────────────────────────────────────────────────────
+startup_sync_from_gcs()
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -1658,6 +1727,38 @@ def _get_or_create_webhook_token():
         settings["webhook_token"] = token
         save_settings(settings)
     return token
+
+
+@app.route("/api/gcs/status", methods=["GET"])
+def gcs_status():
+    """GCS 연동 상태 확인."""
+    return jsonify({
+        "configured": bool(HAS_GCS and GCS_BUCKET_NAME),
+        "bucket": GCS_BUCKET_NAME or None,
+    })
+
+
+@app.route("/api/gcs/save", methods=["POST"])
+def gcs_save():
+    """현재 settings.json + tickers.csv를 GCS에 업로드."""
+    if not GCS_BUCKET_NAME:
+        return jsonify({"error": "GCS_BUCKET_NAME 환경변수가 설정되지 않았습니다"}), 400
+    if not HAS_GCS:
+        return jsonify({"error": "google-cloud-storage 패키지가 설치되지 않았습니다"}), 500
+
+    results = {}
+    if os.path.exists(SETTINGS_FILE):
+        results["settings.json"] = gcs_upload(SETTINGS_FILE, "settings.json")
+    else:
+        results["settings.json"] = False
+
+    if os.path.exists(TICKERS_CSV_FILE):
+        results["tickers.csv"] = gcs_upload(TICKERS_CSV_FILE, "tickers.csv")
+    else:
+        results["tickers.csv"] = False
+
+    success = all(results.values())
+    return jsonify({"success": success, "uploaded": results, "bucket": GCS_BUCKET_NAME}), (200 if success else 500)
 
 
 @app.route("/api/webhook/info", methods=["GET"])

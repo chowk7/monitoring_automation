@@ -1029,4 +1029,53 @@ document.addEventListener("DOMContentLoaded", () => {
         div.textContent = str;
         return div.innerHTML;
     }
+
+    // ─── GCS 동기화 ───────────────────────────────────────────────────
+
+    async function loadGcsStatus() {
+        try {
+            const resp = await fetch("/api/gcs/status");
+            const data = await resp.json();
+            const section = document.getElementById("gcsSyncSection");
+            if (data.configured && section) {
+                section.style.display = "";
+                const badge = document.getElementById("gcsBucketBadge");
+                if (badge) badge.textContent = data.bucket;
+            }
+        } catch (e) {
+            // GCS not available – section stays hidden
+        }
+    }
+
+    async function saveToGcs() {
+        const btn = document.getElementById("gcsSaveBtn");
+        const status = document.getElementById("gcsSyncStatus");
+        if (!btn || !status) return;
+        btn.disabled = true;
+        status.textContent = "저장 중...";
+        status.style.color = "";
+        try {
+            const resp = await fetch("/api/gcs/save", { method: "POST" });
+            const data = await resp.json();
+            if (data.success) {
+                status.textContent = "✓ GCS 저장 완료";
+                status.style.color = "var(--success, #10b981)";
+            } else {
+                const failed = Object.entries(data.uploaded || {}).filter(([, v]) => !v).map(([k]) => k).join(", ");
+                status.textContent = `✗ 저장 실패 (${failed || "알 수 없음"})`;
+                status.style.color = "#ef4444";
+            }
+        } catch (e) {
+            status.textContent = "✗ 오류 발생";
+            status.style.color = "#ef4444";
+        } finally {
+            btn.disabled = false;
+            setTimeout(() => { status.textContent = ""; }, 5000);
+        }
+    }
+
+    const gcsSaveBtn = document.getElementById("gcsSaveBtn");
+    if (gcsSaveBtn) gcsSaveBtn.addEventListener("click", saveToGcs);
+
+    loadGcsStatus();
 });

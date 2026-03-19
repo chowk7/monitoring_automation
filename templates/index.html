@@ -161,6 +161,19 @@
             </div>
         </section>
 
+        <!-- GCS 설정 동기화 -->
+        <section class="card gcs-section" id="gcsSyncSection" style="display:none;">
+            <div class="section-header">
+                <h2>☁ GCS 설정 동기화</h2>
+                <span id="gcsBucketBadge" class="badge" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+            </div>
+            <p class="settings-hint" style="margin:8px 0 12px;">Ticker 목록과 설정값을 GCP Storage 버킷에 저장합니다. 앱 재시작 시 GCS에서 자동으로 불러옵니다.</p>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button id="gcsSaveBtn" class="btn btn-save-model" style="padding:8px 18px;">☁ GCS에 저장</button>
+                <span id="gcsSyncStatus" style="font-size:13px;"></span>
+            </div>
+        </section>
+
         <!-- Analyze Section (always visible) -->
         <section class="card analyze-section">
             <!-- Analysis Date -->
