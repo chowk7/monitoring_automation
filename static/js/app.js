@@ -228,6 +228,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.news_sources) {
                 const newsApiEl = document.getElementById("newsApiStatus");
                 const googleCseEl = document.getElementById("googleCseStatus");
+                const naverEl = document.getElementById("naverStatus");
                 if (newsApiEl) {
                     if (data.news_sources.newsapi) {
                         newsApiEl.textContent = "NewsAPI ✓";
@@ -244,6 +245,15 @@ document.addEventListener("DOMContentLoaded", () => {
                     } else {
                         googleCseEl.textContent = "Google CSE ✗ (API 키 필요)";
                         googleCseEl.className = "status-badge status-inactive";
+                    }
+                }
+                if (naverEl) {
+                    if (data.news_sources.naver) {
+                        naverEl.textContent = "Naver ✓";
+                        naverEl.className = "status-badge status-active";
+                    } else {
+                        naverEl.textContent = "Naver ✗ (NAVER_CLIENT_ID/SECRET 필요)";
+                        naverEl.className = "status-badge status-inactive";
                     }
                 }
             }

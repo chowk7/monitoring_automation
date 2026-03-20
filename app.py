@@ -1,5 +1,6 @@
 import os
 import gc
+import re
 import csv
 import json
 import logging
@@ -102,6 +103,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "") or GEMINI_API_KEY
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 
 # Email configuration
 SMTP_HOST = "smtp.gmail.com"
@@ -565,6 +568,7 @@ def get_settings():
         "yahoo_finance": True,  # always available, no API key needed
         "newsapi": bool(NEWS_API_KEY),
         "google_cse": bool(GOOGLE_API_KEY and GOOGLE_CSE_ID),
+        "naver": bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET),
     }
     settings["default_prompt_with_articles"] = DEFAULT_PROMPT_WITH_ARTICLES
     settings["default_prompt_without_articles"] = DEFAULT_PROMPT_WITHOUT_ARTICLES
@@ -1498,10 +1502,65 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
         return []
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def search_news_articles_naver(company_name, ticker="", target_date=None, custom_query=None):
+    """Search Korean news from Naver Search API (requires NAVER_CLIENT_ID + NAVER_CLIENT_SECRET).
+
+    Returns articles sorted by publish date (newest first).
+    Naver is especially useful for Korean stocks and market indices (코스피/코스닥).
+    """
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        return []
+    try:
+        query = build_search_query(custom_query, company_name, ticker, company_name)
+        url = "https://openapi.naver.com/v1/search/news.json"
+        params = {"query": query, "display": 5, "sort": "date"}
+        headers = {
+            "X-Naver-Client-Id": NAVER_CLIENT_ID,
+            "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            logger.warning(f"Naver Search API error {resp.status_code} for '{query}'")
+            return []
+
+        from email.utils import parsedate as _parsedate
+        articles = []
+        for item in resp.json().get("items", []):
+            title = _HTML_TAG_RE.sub("", item.get("title", "")).strip()
+            if not title:
+                continue
+            snippet = _HTML_TAG_RE.sub("", item.get("description", "")).strip()
+            link = item.get("originallink") or item.get("link", "")
+            pub_date = ""
+            raw_date = item.get("pubDate", "")
+            if raw_date:
+                try:
+                    parsed = _parsedate(raw_date)
+                    if parsed:
+                        pub_date = f"{parsed[0]:04d}-{parsed[1]:02d}-{parsed[2]:02d}"
+                except Exception:
+                    pass
+            articles.append({
+                "title": title,
+                "snippet": snippet,
+                "link": link,
+                "source": "Naver",
+                "date": pub_date,
+            })
+        logger.info(f"Naver: found {len(articles)} articles for '{query}'")
+        return articles
+    except Exception as e:
+        logger.error(f"Naver Search error for '{company_name}': {e}")
+        return []
+
+
 def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None):
     """Search news from all available sources and merge results.
 
-    Priority: Yahoo Finance (always) → NewsAPI (if configured) → Google CSE (if configured)
+    Priority: Yahoo Finance (always) → NewsAPI → Google CSE → Naver (Korean news)
     Returns up to 10 deduplicated articles.
     """
     all_articles = []
@@ -1516,6 +1575,10 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
     # 3. Google CSE — optional
     if GOOGLE_API_KEY and GOOGLE_CSE_ID:
         all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
+
+    # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
+    if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET:
+        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
 
     # Deduplicate by title
     seen_titles = set()
