@@ -280,7 +280,7 @@ Instructions:
 4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 "개별이슈 미발견"으로만 출력해라.
 5. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
 6. 유효한 분석이 있는 경우에만 한글 분석 후 영어로 한 문장 요약 추가. "개별이슈 미발견"인 경우 영어 요약 생략.
-7. 응답 맨 끝에 분석에 활용한 기사 번호를 반드시 `REFS:[1,3]` 형식으로 출력해라. 주가 변동과 무관한 기사는 포함하지 마라. 분석이 "개별이슈 미발견"인 경우 `REFS:[]` 출력."""
+7. 응답 맨 끝에 분석에 가장 관련도 높은 기사 번호를 최대 3개만 골라 반드시 `REFS:[1,3]` 형식으로 출력해라. 주가 변동과 무관한 기사는 포함하지 마라. 분석이 "개별이슈 미발견"인 경우 `REFS:[]` 출력."""
 
 DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 
@@ -1853,7 +1853,7 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
             raw = refs_match.group(1)
             idxs = [int(x.strip()) - 1 for x in raw.split(',') if x.strip().isdigit()]
             valid = [articles[i] for i in idxs if 0 <= i < len(articles)]
-            used_articles = valid  # empty list = 개별이슈 미발견
+            used_articles = valid[:3]  # top 3 most relevant articles
             text = text[:refs_match.start()].strip()
         return {"analysis": text, "used_articles": used_articles}
     except Exception as e:
