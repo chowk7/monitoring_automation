@@ -200,6 +200,19 @@ document.addEventListener("DOMContentLoaded", () => {
         testGmailReadBtn.addEventListener("click", testGmailRead);
     }
 
+    // News source toggles — auto-save on change
+    [
+        ["yahooFinanceEnabled", "yahoo_finance_enabled"],
+        ["newsApiEnabled", "newsapi_enabled"],
+        ["googleCseEnabled", "google_cse_enabled"],
+        ["naverEnabled", "naver_enabled"],
+    ].forEach(([id, key]) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener("change", () => saveNewsSourceEnabled(key, el.checked));
+        }
+    });
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -235,38 +248,45 @@ document.addEventListener("DOMContentLoaded", () => {
                 modelSelect.value = data.gemini_model;
             }
 
-            // Update news sources status
+            // Update news source checkboxes
             if (data.news_sources) {
-                const newsApiEl = document.getElementById("newsApiStatus");
-                const googleCseEl = document.getElementById("googleCseStatus");
-                const naverEl = document.getElementById("naverStatus");
-                if (newsApiEl) {
-                    if (data.news_sources.newsapi) {
-                        newsApiEl.textContent = "NewsAPI ✓";
-                        newsApiEl.className = "status-badge status-active";
-                    } else {
-                        newsApiEl.textContent = "NewsAPI ✗ (NEWS_API_KEY 필요)";
-                        newsApiEl.className = "status-badge status-inactive";
-                    }
+                // Yahoo Finance — always available, just respects user toggle
+                const yahooCb = document.getElementById("yahooFinanceEnabled");
+                if (yahooCb) {
+                    yahooCb.checked = data.yahoo_finance_enabled !== false;
                 }
-                if (googleCseEl) {
-                    if (data.news_sources.google_cse) {
-                        googleCseEl.textContent = "Google CSE ✓";
-                        googleCseEl.className = "status-badge status-active";
-                    } else {
-                        googleCseEl.textContent = "Google CSE ✗ (API 키 필요)";
-                        googleCseEl.className = "status-badge status-inactive";
-                    }
+
+                // NewsAPI
+                const newsApiCb = document.getElementById("newsApiEnabled");
+                const newsApiStatusEl = document.getElementById("newsApiStatus");
+                if (newsApiCb) {
+                    const available = !!data.news_sources.newsapi;
+                    newsApiCb.disabled = !available;
+                    newsApiCb.checked = available && data.newsapi_enabled !== false;
+                    if (newsApiStatusEl) newsApiStatusEl.textContent = available ? "" : "(API 키 없음)";
                 }
-                if (naverEl) {
-                    if (data.news_sources.naver) {
-                        naverEl.textContent = "Naver ✓";
-                        naverEl.className = "status-badge status-active";
-                    } else {
-                        naverEl.textContent = "Naver ✗ (NAVER_CLIENT_ID/SECRET 필요)";
-                        naverEl.className = "status-badge status-inactive";
-                    }
+
+                // Google CSE
+                const googleCseCb = document.getElementById("googleCseEnabled");
+                const googleCseStatusEl = document.getElementById("googleCseStatus");
+                if (googleCseCb) {
+                    const available = !!data.news_sources.google_cse;
+                    googleCseCb.disabled = !available;
+                    googleCseCb.checked = available && data.google_cse_enabled !== false;
+                    if (googleCseStatusEl) googleCseStatusEl.textContent = available ? "" : "(API 키 없음)";
                 }
+
+                // Naver
+                const naverCb = document.getElementById("naverEnabled");
+                const naverStatusEl = document.getElementById("naverStatus");
+                if (naverCb) {
+                    const available = !!data.news_sources.naver;
+                    naverCb.disabled = !available;
+                    naverCb.checked = available && data.naver_enabled !== false;
+                    if (naverStatusEl) naverStatusEl.textContent = available ? "" : "(API 키 없음)";
+                }
+
+                // Gmail memo status badge
                 const gmailReadEl = document.getElementById("gmailReadStatus");
                 if (gmailReadEl) {
                     if (data.news_sources.gmail_read) {
@@ -429,6 +449,18 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             showError("저장 오류");
+        }
+    }
+
+    async function saveNewsSourceEnabled(key, value) {
+        try {
+            await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [key]: value }),
+            });
+        } catch (err) {
+            console.error("Failed to save news source setting:", err);
         }
     }
 
@@ -1079,9 +1111,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     const sourcePart = a.source
                         ? ` <small style="color:#5a6a7a;">(${escapeHtml(a.source)})</small>`
                         : "";
-                    const titleHtml = a.link
-                        ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
-                        : escapeHtml(a.title);
+                    let titleHtml;
+                    if (a.source === "Gmail 메모" && a.snippet) {
+                        // Gmail: show email body (snippet) as the main content
+                        titleHtml = `<span style="color:#c8d0da;font-weight:500;">${escapeHtml(a.title)}</span>`
+                            + `<div style="margin-top:4px;padding:6px 8px;background:#1a1a2e;border-left:2px solid #555;font-size:0.83em;color:#a0aab8;white-space:pre-wrap;max-height:120px;overflow-y:auto;">${escapeHtml(a.snippet)}</div>`;
+                    } else {
+                        titleHtml = a.link
+                            ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
+                            : escapeHtml(a.title);
+                    }
                     return `<li>${datePart}${titleHtml}${sourcePart}</li>`;
                 }).join("");
 

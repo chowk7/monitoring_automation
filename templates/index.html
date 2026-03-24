@@ -88,17 +88,29 @@
                     <button id="saveModelBtn" class="btn btn-save-model">저장</button>
                 </div>
 
-                <!-- News Search Status -->
+                <!-- News Search Sources -->
                 <div class="settings-row">
-                    <label>뉴스 기사 검색</label>
-                    <div class="news-sources-status" id="newsSourcesStatus">
-                        <span class="status-badge status-active">Yahoo Finance ✓</span>
-                        <span id="newsApiStatus" class="status-badge status-unknown">NewsAPI 확인 중...</span>
-                        <span id="googleCseStatus" class="status-badge status-unknown">Google CSE 확인 중...</span>
-                        <span id="naverStatus" class="status-badge status-unknown">Naver 확인 중...</span>
+                    <label>뉴스 기사 검색 소스</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="yahooFinanceEnabled" style="width:15px;height:15px;">
+                            Yahoo Finance
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="newsApiEnabled" style="width:15px;height:15px;">
+                            NewsAPI <span id="newsApiStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="googleCseEnabled" style="width:15px;height:15px;">
+                            Google CSE <span id="googleCseStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="naverEnabled" style="width:15px;height:15px;">
+                            Naver <span id="naverStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
                         <span id="gmailReadStatus" class="status-badge status-unknown">Gmail 메모 확인 중...</span>
                     </div>
-                    <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE/Naver는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
+                    <small class="settings-hint">체크 해제 시 해당 소스 검색 제외 · API 키 미설정 소스는 비활성화됨</small>
                 </div>
 
                 <!-- Gmail 메모 읽기 -->

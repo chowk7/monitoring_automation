@@ -335,6 +335,10 @@ def load_settings():
         "gmail_read_enabled": False,
         "gmail_subject_filter": "",
         "gmail_max_emails": 3,
+        "yahoo_finance_enabled": True,
+        "newsapi_enabled": True,
+        "google_cse_enabled": True,
+        "naver_enabled": True,
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -610,6 +614,9 @@ def update_settings():
                 settings["gmail_max_emails"] = val
         except (TypeError, ValueError):
             pass
+    for key in ["yahoo_finance_enabled", "newsapi_enabled", "google_cse_enabled", "naver_enabled"]:
+        if key in data:
+            settings[key] = bool(data[key])
     save_settings(settings)
     return jsonify(settings)
 
@@ -1123,6 +1130,7 @@ def analyze_stream():
                                 "link": a.get("link", ""),
                                 "source": a.get("source", ""),
                                 "date": a.get("date", ""),
+                                "snippet": a.get("snippet", ""),
                             }
                             for a in used_articles
                         ],
@@ -1740,20 +1748,22 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
     Returns up to 10 deduplicated articles.
     """
     all_articles = []
+    settings = load_settings()
 
     # 1. Yahoo Finance — always available (uses ticker directly, not text query)
-    all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
+    if settings.get("yahoo_finance_enabled", True):
+        all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
 
     # 2. NewsAPI — optional
-    if NEWS_API_KEY:
+    if NEWS_API_KEY and settings.get("newsapi_enabled", True):
         all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
 
     # 3. Google CSE — optional
-    if GOOGLE_API_KEY and GOOGLE_CSE_ID:
+    if GOOGLE_API_KEY and GOOGLE_CSE_ID and settings.get("google_cse_enabled", True):
         all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
 
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
-    if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET:
+    if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET and settings.get("naver_enabled", True):
         all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
@@ -1762,7 +1772,6 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
         all_articles.extend(_filter_gmail_memos_for_ticker(gmail_articles, ticker, company_name))
     else:
         # Fallback: fetch directly from IMAP (used when no cache provided, e.g. market index search)
-        settings = load_settings()
         if settings.get("gmail_read_enabled") and settings.get("gmail_subject_filter", "").strip():
             max_emails = int(settings.get("gmail_max_emails", 3))
             all_articles.extend(read_gmail_by_subject(settings["gmail_subject_filter"].strip(), max_emails=max_emails))
@@ -1953,7 +1962,7 @@ def run_scheduled_analysis(target_date=None):
                     "articles_found": len(articles) > 0,
                     "articles_count": len(articles),
                     "articles_sources": list(set(a.get("source", "") for a in articles if a.get("source"))),
-                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in result["used_articles"]],
+                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", ""), "snippet": a.get("snippet", "")} for a in result["used_articles"]],
                     "model_used": model,
                 })
             except Exception as e:
