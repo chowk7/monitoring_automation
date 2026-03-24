@@ -279,7 +279,8 @@ Instructions:
 3. 종목명이나 변동률은 출력하지 마라.
 4. 뉴스 기사가 변동 원인과 무관하거나 불충분하면 "개별이슈 미발견"으로만 출력해라.
 5. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
-6. 유효한 분석이 있는 경우에만 한글 분석 후 영어로 한 문장 요약 추가. "개별이슈 미발견"인 경우 영어 요약 생략."""
+6. 유효한 분석이 있는 경우에만 한글 분석 후 영어로 한 문장 요약 추가. "개별이슈 미발견"인 경우 영어 요약 생략.
+7. 응답 맨 끝에 분석에 활용한 기사 번호를 반드시 `REFS:[1,3]` 형식으로 출력해라. 주가 변동과 무관한 기사는 포함하지 마라. 분석이 "개별이슈 미발견"인 경우 `REFS:[]` 출력."""
 
 DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 
@@ -1101,17 +1102,18 @@ def analyze_stream():
 
                     # Step 2: Analyze with Gemini
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'Gemini 분석 중... ({ticker})'})}\n\n"
-                    analysis = analyze_with_gemini(
+                    result = analyze_with_gemini(
                         ticker, info, articles=articles, model=model,
                         prompt_templates=prompt_templates,
                     )
 
                     article_sources = list(set(a.get("source", "") for a in articles if a.get("source")))
+                    used_articles = result["used_articles"]
                     batch_results.append({
                         "ticker": ticker,
                         "name": info.get("name", ticker),
                         "change_pct": info["change_pct"],
-                        "analysis": analysis,
+                        "analysis": result["analysis"],
                         "articles_found": len(articles) > 0,
                         "articles_count": len(articles),
                         "articles_sources": article_sources,
@@ -1122,7 +1124,7 @@ def analyze_stream():
                                 "source": a.get("source", ""),
                                 "date": a.get("date", ""),
                             }
-                            for a in articles[:8]
+                            for a in used_articles
                         ],
                         "model_used": model,
                     })
@@ -1789,7 +1791,7 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
         unique = date_filtered
 
     logger.info(f"Total unique articles for {ticker}: {len(unique)}")
-    return unique[:10]
+    return unique
 
 
 def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_templates=None):
@@ -1799,11 +1801,11 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
     Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
     """
     if not GEMINI_API_KEY:
-        return "Gemini API key not configured."
+        return {"analysis": "Gemini API key not configured.", "used_articles": []}
 
     client = get_gemini_client()
     if not client:
-        return "Gemini client initialization failed."
+        return {"analysis": "Gemini client initialization failed.", "used_articles": []}
 
     if model is None:
         settings = load_settings()
@@ -1817,14 +1819,14 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
 
     if not articles:
         # No articles from the analysis date → no speculation, return directly
-        return "개별이슈 미발견."
+        return {"analysis": "개별이슈 미발견.", "used_articles": []}
 
     sources_used = list(set(a.get("source", "") for a in articles if a.get("source")))
     sources_label = ", ".join(sources_used) if sources_used else "외부 검색"
     articles_text = "\n".join([
         f"  [{i+1}] [{a.get('source', '')}] {a['title']}" +
         (f"\n      {a['snippet']}" if a.get('snippet') else "")
-        for i, a in enumerate(articles[:8])
+        for i, a in enumerate(articles)
     ])
     tmpl = templates.get("with_articles") or DEFAULT_PROMPT_WITH_ARTICLES
     prompt = apply_template(
@@ -1843,9 +1845,19 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
             model=model,
             contents=prompt,
         )
-        return response.text
+        text = response.text.strip()
+        # Parse REFS:[...] tag that Gemini outputs to identify relevant articles
+        refs_match = re.search(r'REFS:\[([^\]]*)\]', text)
+        used_articles = articles  # fallback: show all if tag absent
+        if refs_match:
+            raw = refs_match.group(1)
+            idxs = [int(x.strip()) - 1 for x in raw.split(',') if x.strip().isdigit()]
+            valid = [articles[i] for i in idxs if 0 <= i < len(articles)]
+            used_articles = valid  # empty list = 개별이슈 미발견
+            text = text[:refs_match.start()].strip()
+        return {"analysis": text, "used_articles": used_articles}
     except Exception as e:
-        return f"분석 실패: {str(e)}"
+        return {"analysis": f"분석 실패: {str(e)}", "used_articles": []}
 
 
 # ─── Scheduled / Webhook Analysis ────────────────────────────────────────────
@@ -1931,17 +1943,17 @@ def run_scheduled_analysis(target_date=None):
                     target_date=target_date, custom_query=custom_query,
                     gmail_articles=_gmail_cache,
                 )
-                analysis = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
+                result = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
                 meta = ticker_meta.get(ticker, {})
                 results.append({
                     "ticker": ticker,
                     "name": info.get("name", ticker) or meta.get("name", ticker),
                     "change_pct": info["change_pct"],
-                    "analysis": analysis,
+                    "analysis": result["analysis"],
                     "articles_found": len(articles) > 0,
                     "articles_count": len(articles),
                     "articles_sources": list(set(a.get("source", "") for a in articles if a.get("source"))),
-                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in articles[:5]],
+                    "articles": [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in result["used_articles"]],
                     "model_used": model,
                 })
             except Exception as e:
