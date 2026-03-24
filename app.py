@@ -1068,6 +1068,15 @@ def analyze_stream():
         # Phase 2: Analyze filtered stocks in batches
         total_analysis_batches = (len(filtered_list) + ANALYSIS_BATCH_SIZE - 1) // ANALYSIS_BATCH_SIZE
 
+        # Fetch Gmail memos once before the per-stock loop (avoids repeated IMAP connections)
+        _gmail_cache = None
+        _gs = load_settings()
+        if _gs.get("gmail_read_enabled") and _gs.get("gmail_subject_filter", "").strip():
+            _gmail_cache = read_gmail_by_subject(
+                _gs["gmail_subject_filter"].strip(),
+                max_emails=int(_gs.get("gmail_max_emails", 3)),
+            )
+
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
             batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
             batch_num = batch_idx // ANALYSIS_BATCH_SIZE + 1
@@ -1087,6 +1096,7 @@ def analyze_stream():
                         info.get("date", ""),
                         target_date=target_date,
                         custom_query=custom_query,
+                        gmail_articles=_gmail_cache,
                     )
 
                     # Step 2: Analyze with Gemini
@@ -1599,6 +1609,24 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
         return []
 
 
+def _filter_gmail_memos_for_ticker(memos, ticker, company_name=""):
+    """Return memos that mention the ticker or company name.
+    If none match, return all memos (general memo fallback)."""
+    if not memos:
+        return []
+    ticker_up = ticker.upper()
+    name_words = [w.upper() for w in company_name.split() if len(w) >= 4]
+
+    def matches(memo):
+        text = f"{memo.get('title', '')} {memo.get('body', memo.get('snippet', ''))}".upper()
+        if ticker_up in text:
+            return True
+        return any(w in text for w in name_words)
+
+    matched = [m for m in memos if matches(m)]
+    return matched if matched else memos  # fallback: no match → include all
+
+
 def read_gmail_by_subject(subject_filter, max_emails=3):
     """Read emails from the registered Gmail account (SMTP_USER) via IMAP.
 
@@ -1702,10 +1730,11 @@ def read_gmail_by_subject(subject_filter, max_emails=3):
         return []
 
 
-def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None):
+def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None, gmail_articles=None):
     """Search news from all available sources and merge results.
 
-    Priority: Yahoo Finance (always) → NewsAPI → Google CSE → Naver (Korean news)
+    Priority: Yahoo Finance (always) → NewsAPI → Google CSE → Naver (Korean news) → Gmail memos
+    gmail_articles: pre-fetched memo list (cached); if None, fetches from IMAP directly.
     Returns up to 10 deduplicated articles.
     """
     all_articles = []
@@ -1726,10 +1755,15 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
         all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
-    settings = load_settings()
-    if settings.get("gmail_read_enabled") and settings.get("gmail_subject_filter", "").strip():
-        max_emails = int(settings.get("gmail_max_emails", 3))
-        all_articles.extend(read_gmail_by_subject(settings["gmail_subject_filter"].strip(), max_emails=max_emails))
+    if gmail_articles is not None:
+        # Use pre-cached memos, filtered to this ticker/company
+        all_articles.extend(_filter_gmail_memos_for_ticker(gmail_articles, ticker, company_name))
+    else:
+        # Fallback: fetch directly from IMAP (used when no cache provided, e.g. market index search)
+        settings = load_settings()
+        if settings.get("gmail_read_enabled") and settings.get("gmail_subject_filter", "").strip():
+            max_emails = int(settings.get("gmail_max_emails", 3))
+            all_articles.extend(read_gmail_by_subject(settings["gmail_subject_filter"].strip(), max_emails=max_emails))
 
     # Deduplicate by title
     seen_titles = set()
@@ -1880,12 +1914,22 @@ def run_scheduled_analysis(target_date=None):
         gc.collect()
 
         # Phase 2: 종목별 뉴스 + Gemini 분석
+        # Fetch Gmail memos once before the per-stock loop (avoids repeated IMAP connections)
+        _gmail_cache = None
+        _gs = load_settings()
+        if _gs.get("gmail_read_enabled") and _gs.get("gmail_subject_filter", "").strip():
+            _gmail_cache = read_gmail_by_subject(
+                _gs["gmail_subject_filter"].strip(),
+                max_emails=int(_gs.get("gmail_max_emails", 3)),
+            )
+
         results = []
         for ticker, info in filtered_list:
             try:
                 articles = search_all_news_articles(
                     ticker, info.get("name", ticker), info.get("date", ""),
                     target_date=target_date, custom_query=custom_query,
+                    gmail_articles=_gmail_cache,
                 )
                 analysis = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
                 meta = ticker_meta.get(ticker, {})
