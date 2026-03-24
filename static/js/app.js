@@ -195,6 +195,11 @@ document.addEventListener("DOMContentLoaded", () => {
         saveGmailReadBtn.addEventListener("click", saveGmailReadSettings);
     }
 
+    const testGmailReadBtn = document.getElementById("testGmailReadBtn");
+    if (testGmailReadBtn) {
+        testGmailReadBtn.addEventListener("click", testGmailRead);
+    }
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -425,6 +430,52 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             showError("저장 오류");
         }
+    }
+
+    async function testGmailRead() {
+        const subject = document.getElementById("gmailSubjectFilter")?.value.trim() || "";
+        const max = document.getElementById("gmailMaxEmails")?.value || 5;
+        const resultEl = document.getElementById("gmailTestResult");
+        if (!resultEl) return;
+
+        resultEl.style.display = "block";
+        resultEl.innerHTML = "<span style='color:#aaa'>IMAP 연결 중...</span>";
+
+        try {
+            const params = new URLSearchParams({ max });
+            if (subject) params.set("subject", subject);
+            const resp = await fetch(`/api/gmail/test?${params}`);
+            const data = await resp.json();
+
+            if (!data.ok) {
+                resultEl.innerHTML = `<span style='color:#e74c3c'>❌ 오류: ${data.error}</span>`;
+                return;
+            }
+
+            if (data.count === 0) {
+                resultEl.innerHTML = `<span style='color:#f39c12'>⚠ <b>${data.account}</b> 받은편지함에서 "<b>${data.subject_filter}</b>" 제목의 이메일을 찾지 못했습니다.</span>`;
+                return;
+            }
+
+            let html = `<div style='color:#2ecc71;margin-bottom:8px'>✓ <b>${data.account}</b>에서 "<b>${data.subject_filter}</b>" 이메일 <b>${data.count}개</b> 읽기 성공</div>`;
+            data.articles.forEach((a, i) => {
+                html += `
+                <div style='border:1px solid #444;border-radius:4px;padding:8px;margin-bottom:8px;background:#252535'>
+                    <div style='display:flex;justify-content:space-between;margin-bottom:4px'>
+                        <span style='color:#7ec8e3;font-weight:bold'>[${i + 1}] ${escHtml(a.title)}</span>
+                        <span style='color:#888;font-size:0.9em'>${a.date || "날짜 없음"}</span>
+                    </div>
+                    <div style='color:#ccc;white-space:pre-wrap;word-break:break-all'>${escHtml(a.snippet || "(본문 없음)")}</div>
+                </div>`;
+            });
+            resultEl.innerHTML = html;
+        } catch (err) {
+            resultEl.innerHTML = `<span style='color:#e74c3c'>❌ 요청 오류: ${err.message}</span>`;
+        }
+    }
+
+    function escHtml(str) {
+        return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     function stopAnalysis() {

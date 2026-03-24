@@ -119,8 +119,10 @@
                             <option value="10">최대 10개</option>
                         </select>
                         <button id="saveGmailReadBtn" class="btn btn-save-model">저장</button>
+                        <button id="testGmailReadBtn" class="btn" style="background:#555;color:#fff;">연결 테스트</button>
                     </div>
                     <small class="settings-hint">발신 Gmail 계정(SMTP_USER)으로 특정 제목의 이메일을 보내두면 분석 시 자동 참고 · Gmail 설정에서 IMAP 사용 활성화 필요</small>
+                    <div id="gmailTestResult" style="display:none;margin-top:10px;padding:12px;border-radius:6px;background:#1e1e2e;border:1px solid #444;font-size:0.85em;max-height:320px;overflow-y:auto;"></div>
                 </div>
 
                 <!-- Custom Search Query -->

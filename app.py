@@ -613,6 +613,33 @@ def update_settings():
     return jsonify(settings)
 
 
+# ─── Gmail IMAP Test Route ─────────────────────────────────────────────────────
+
+@app.route("/api/gmail/test", methods=["GET"])
+def gmail_test():
+    """Test Gmail IMAP reading. Returns the raw parsed emails for diagnostic purposes."""
+    subject_filter = request.args.get("subject", "").strip()
+    max_emails = min(int(request.args.get("max", 5)), 10)
+
+    if not SMTP_USER or not SMTP_PASSWORD:
+        return jsonify({"ok": False, "error": "SMTP_USER 또는 SMTP_PASSWORD가 설정되지 않았습니다."}), 400
+    if not subject_filter:
+        # Try with settings subject filter
+        settings = load_settings()
+        subject_filter = settings.get("gmail_subject_filter", "").strip()
+    if not subject_filter:
+        return jsonify({"ok": False, "error": "제목 필터를 입력하거나 설정에서 저장해 주세요."}), 400
+
+    articles = read_gmail_by_subject(subject_filter, max_emails=max_emails)
+    return jsonify({
+        "ok": True,
+        "account": SMTP_USER,
+        "subject_filter": subject_filter,
+        "count": len(articles),
+        "articles": articles,
+    })
+
+
 # ─── Email Recipients Routes ──────────────────────────────────────────────────
 
 @app.route("/api/email/recipients", methods=["GET"])
