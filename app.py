@@ -1678,11 +1678,13 @@ def read_gmail_by_subject(subject_filter, max_emails=3):
                 except Exception:
                     pass
             body = _extract_text(msg)
-            snippet = body[:500].replace("\n", " ").strip() if body else ""
+            # Use up to 3000 chars of the body as snippet (preserving line breaks for Gemini context)
+            snippet = body[:3000].strip() if body else ""
             if subject or snippet:
                 articles.append({
                     "title": subject or f"Gmail 메모 ({pub_date})",
                     "snippet": snippet,
+                    "body": body,  # full body for test/diagnostic endpoint
                     "link": "",
                     "source": "Gmail 메모",
                     "date": pub_date,

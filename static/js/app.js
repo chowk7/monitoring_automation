@@ -465,7 +465,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         <span style='color:#7ec8e3;font-weight:bold'>[${i + 1}] ${escHtml(a.title)}</span>
                         <span style='color:#888;font-size:0.9em'>${a.date || "날짜 없음"}</span>
                     </div>
-                    <div style='color:#ccc;white-space:pre-wrap;word-break:break-all'>${escHtml(a.snippet || "(본문 없음)")}</div>
+                    <div style='color:#ccc;white-space:pre-wrap;word-break:break-all'>${escHtml(a.body || a.snippet || "(본문 없음)")}</div>
                 </div>`;
             });
             resultEl.innerHTML = html;
