@@ -96,8 +96,31 @@
                         <span id="newsApiStatus" class="status-badge status-unknown">NewsAPI 확인 중...</span>
                         <span id="googleCseStatus" class="status-badge status-unknown">Google CSE 확인 중...</span>
                         <span id="naverStatus" class="status-badge status-unknown">Naver 확인 중...</span>
+                        <span id="gmailReadStatus" class="status-badge status-unknown">Gmail 메모 확인 중...</span>
                     </div>
-                    <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
+                    <small class="settings-hint">Yahoo Finance는 항상 검색 · NewsAPI/Google CSE/Naver는 API 키 설정 시 활성화<br>기사 있으면 기사+Gemini 지식 함께 분석 · 없으면 Gemini 자체 지식으로 분석</small>
+                </div>
+
+                <!-- Gmail 메모 읽기 -->
+                <div class="settings-row">
+                    <label>Gmail 메모 읽기</label>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="gmailReadEnabled" style="width:16px;height:16px;">
+                            활성화
+                        </label>
+                        <input type="text" id="gmailSubjectFilter" class="model-select" style="flex:1;min-width:180px;"
+                               placeholder="제목 필터 (예: 투자메모, 관심종목)"
+                               autocomplete="off" spellcheck="false">
+                        <select id="gmailMaxEmails" class="model-select" style="width:90px;">
+                            <option value="1">최대 1개</option>
+                            <option value="3" selected>최대 3개</option>
+                            <option value="5">최대 5개</option>
+                            <option value="10">최대 10개</option>
+                        </select>
+                        <button id="saveGmailReadBtn" class="btn btn-save-model">저장</button>
+                    </div>
+                    <small class="settings-hint">발신 Gmail 계정(SMTP_USER)으로 특정 제목의 이메일을 보내두면 분석 시 자동 참고 · Gmail 설정에서 IMAP 사용 활성화 필요</small>
                 </div>
 
                 <!-- Custom Search Query -->

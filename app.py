@@ -331,6 +331,9 @@ def load_settings():
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
         "custom_query": "",
         "change_threshold": 5.0,
+        "gmail_read_enabled": False,
+        "gmail_subject_filter": "",
+        "gmail_max_emails": 3,
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -569,6 +572,7 @@ def get_settings():
         "newsapi": bool(NEWS_API_KEY),
         "google_cse": bool(GOOGLE_API_KEY and GOOGLE_CSE_ID),
         "naver": bool(NAVER_CLIENT_ID and NAVER_CLIENT_SECRET),
+        "gmail_read": bool(SMTP_USER and SMTP_PASSWORD and settings.get("gmail_read_enabled") and settings.get("gmail_subject_filter", "").strip()),
     }
     settings["default_prompt_with_articles"] = DEFAULT_PROMPT_WITH_ARTICLES
     settings["default_prompt_without_articles"] = DEFAULT_PROMPT_WITHOUT_ARTICLES
@@ -592,6 +596,17 @@ def update_settings():
             val = float(data["change_threshold"])
             if 0 < val <= 100:
                 settings["change_threshold"] = val
+        except (TypeError, ValueError):
+            pass
+    if "gmail_read_enabled" in data:
+        settings["gmail_read_enabled"] = bool(data["gmail_read_enabled"])
+    if "gmail_subject_filter" in data:
+        settings["gmail_subject_filter"] = str(data["gmail_subject_filter"])[:200]
+    if "gmail_max_emails" in data:
+        try:
+            val = int(data["gmail_max_emails"])
+            if 1 <= val <= 10:
+                settings["gmail_max_emails"] = val
         except (TypeError, ValueError):
             pass
     save_settings(settings)
@@ -1557,6 +1572,107 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
         return []
 
 
+def read_gmail_by_subject(subject_filter, max_emails=3):
+    """Read emails from the registered Gmail account (SMTP_USER) via IMAP.
+
+    Returns articles list (same dict format as other news sources) for emails
+    whose subject contains subject_filter. Requires IMAP to be enabled in Gmail settings.
+    """
+    if not SMTP_USER or not SMTP_PASSWORD or not subject_filter:
+        return []
+    import imaplib
+    import email as _email
+    from email.header import decode_header as _decode_header
+
+    def _decode_str(value):
+        """Decode MIME-encoded header string."""
+        if value is None:
+            return ""
+        parts = _decode_header(value)
+        decoded = []
+        for part, charset in parts:
+            if isinstance(part, bytes):
+                decoded.append(part.decode(charset or "utf-8", errors="replace"))
+            else:
+                decoded.append(part)
+        return "".join(decoded)
+
+    def _extract_text(msg):
+        """Extract plain text body from email message."""
+        body = ""
+        if msg.is_multipart():
+            for part in msg.walk():
+                ct = part.get_content_type()
+                cd = str(part.get("Content-Disposition", ""))
+                if ct == "text/plain" and "attachment" not in cd:
+                    charset = part.get_content_charset() or "utf-8"
+                    body = part.get_payload(decode=True).decode(charset, errors="replace")
+                    break
+        else:
+            ct = msg.get_content_type()
+            if ct == "text/plain":
+                charset = msg.get_content_charset() or "utf-8"
+                body = msg.get_payload(decode=True).decode(charset, errors="replace")
+            elif ct == "text/html":
+                charset = msg.get_content_charset() or "utf-8"
+                raw = msg.get_payload(decode=True).decode(charset, errors="replace")
+                body = _HTML_TAG_RE.sub(" ", raw).strip()
+        return body.strip()
+
+    try:
+        imap = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+        imap.login(SMTP_USER, SMTP_PASSWORD)
+        imap.select("INBOX")
+
+        # Search for emails matching subject filter
+        _, data = imap.search(None, f'SUBJECT "{subject_filter}"')
+        uids = data[0].split()
+        if not uids:
+            imap.logout()
+            logger.info(f"Gmail IMAP: no emails found with subject '{subject_filter}'")
+            return []
+
+        # Take the most recent max_emails
+        recent_uids = uids[-max_emails:][::-1]
+        articles = []
+        for uid in recent_uids:
+            _, msg_data = imap.fetch(uid, "(RFC822)")
+            raw = msg_data[0][1]
+            msg = _email.message_from_bytes(raw)
+            subject = _decode_str(msg.get("Subject", "")).strip()
+            date_str = msg.get("Date", "")
+            pub_date = ""
+            if date_str:
+                try:
+                    from email.utils import parsedate as _pd
+                    parsed = _pd(date_str)
+                    if parsed:
+                        pub_date = f"{parsed[0]:04d}-{parsed[1]:02d}-{parsed[2]:02d}"
+                except Exception:
+                    pass
+            body = _extract_text(msg)
+            snippet = body[:500].replace("\n", " ").strip() if body else ""
+            if subject or snippet:
+                articles.append({
+                    "title": subject or f"Gmail 메모 ({pub_date})",
+                    "snippet": snippet,
+                    "link": "",
+                    "source": "Gmail 메모",
+                    "date": pub_date,
+                })
+
+        imap.logout()
+        logger.info(f"Gmail IMAP: found {len(articles)} emails with subject '{subject_filter}'")
+        return articles
+
+    except imaplib.IMAP4.error as e:
+        logger.error(f"Gmail IMAP auth/search error: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Gmail IMAP error: {e}")
+        return []
+
+
 def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None):
     """Search news from all available sources and merge results.
 
@@ -1579,6 +1695,12 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
     if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET:
         all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
+
+    # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
+    settings = load_settings()
+    if settings.get("gmail_read_enabled") and settings.get("gmail_subject_filter", "").strip():
+        max_emails = int(settings.get("gmail_max_emails", 3))
+        all_articles.extend(read_gmail_by_subject(settings["gmail_subject_filter"].strip(), max_emails=max_emails))
 
     # Deduplicate by title
     seen_titles = set()

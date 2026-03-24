@@ -189,6 +189,12 @@ document.addEventListener("DOMContentLoaded", () => {
         saveThresholdBtn.addEventListener("click", saveThreshold);
     }
 
+    // Save Gmail read settings
+    const saveGmailReadBtn = document.getElementById("saveGmailReadBtn");
+    if (saveGmailReadBtn) {
+        saveGmailReadBtn.addEventListener("click", saveGmailReadSettings);
+    }
+
     // ─── Date Utility ─────────────────────────────────────────────────────
 
     function getKstDateString() {
@@ -256,7 +262,25 @@ document.addEventListener("DOMContentLoaded", () => {
                         naverEl.className = "status-badge status-inactive";
                     }
                 }
+                const gmailReadEl = document.getElementById("gmailReadStatus");
+                if (gmailReadEl) {
+                    if (data.news_sources.gmail_read) {
+                        gmailReadEl.textContent = "Gmail 메모 ✓";
+                        gmailReadEl.className = "status-badge status-active";
+                    } else {
+                        gmailReadEl.textContent = "Gmail 메모 ✗ (비활성)";
+                        gmailReadEl.className = "status-badge status-inactive";
+                    }
+                }
             }
+
+            // Load Gmail read settings
+            const gmailEnabledEl = document.getElementById("gmailReadEnabled");
+            const gmailSubjectEl = document.getElementById("gmailSubjectFilter");
+            const gmailMaxEl = document.getElementById("gmailMaxEmails");
+            if (gmailEnabledEl) gmailEnabledEl.checked = !!data.gmail_read_enabled;
+            if (gmailSubjectEl) gmailSubjectEl.value = data.gmail_subject_filter || "";
+            if (gmailMaxEl) gmailMaxEl.value = data.gmail_max_emails || 3;
 
             // Load prompt templates
             if (data.default_prompt_with_articles) {
@@ -359,6 +383,42 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (resp.ok) {
                 showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
+            } else {
+                showError("저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
+        }
+    }
+
+    async function saveGmailReadSettings() {
+        const enabled = document.getElementById("gmailReadEnabled")?.checked || false;
+        const subject = document.getElementById("gmailSubjectFilter")?.value.trim() || "";
+        const maxEmails = parseInt(document.getElementById("gmailMaxEmails")?.value || "3", 10);
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    gmail_read_enabled: enabled,
+                    gmail_subject_filter: subject,
+                    gmail_max_emails: maxEmails,
+                }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                showSuccess(enabled && subject ? `Gmail 메모 읽기 활성화: "${subject}"` : "Gmail 메모 읽기 비활성화됨");
+                // Update status badge
+                const gmailReadEl = document.getElementById("gmailReadStatus");
+                if (gmailReadEl) {
+                    if (data.news_sources?.gmail_read) {
+                        gmailReadEl.textContent = "Gmail 메모 ✓";
+                        gmailReadEl.className = "status-badge status-active";
+                    } else {
+                        gmailReadEl.textContent = "Gmail 메모 ✗ (비활성)";
+                        gmailReadEl.className = "status-badge status-inactive";
+                    }
+                }
             } else {
                 showError("저장 실패");
             }
