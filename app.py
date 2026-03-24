@@ -1122,7 +1122,7 @@ def analyze_stream():
                                 "source": a.get("source", ""),
                                 "date": a.get("date", ""),
                             }
-                            for a in articles[:5]
+                            for a in articles[:8]
                         ],
                         "model_used": model,
                     })
