@@ -949,7 +949,7 @@ def get_market_indices():
         "analysis": analysis,
         "date": trade_date,
         "articles_by_region": {
-            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", ""), "snippet": a.get("snippet", "")} for a in arts[:5]]
             for region, arts in articles_by_region.items()
         },
     })
@@ -1010,7 +1010,7 @@ def analyze_stream():
         market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
 
         articles_by_region_slim = {
-            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", ""), "snippet": a.get("snippet", "")} for a in arts[:5]]
             for region, arts in articles_by_region.items()
         }
         yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"

@@ -888,7 +888,7 @@ document.addEventListener("DOMContentLoaded", () => {
         currentResults = [];
         currentMarketData = null;
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
-        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
+        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; const _ma = document.getElementById("marketIndicesArticles"); if (_ma) { _ma.innerHTML = ""; _ma.style.display = "none"; } }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -930,7 +930,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         break;
 
                     case "market_indices":
-                        currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date };
+                        currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date, articles_by_region: data.articles_by_region };
                         resultsSection.style.display = "block";
                         renderMarketIndices(data);
                         break;
@@ -1012,6 +1012,38 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.analysis) {
             marketIndicesAnalysis.textContent = data.analysis;
             marketIndicesAnalysis.style.display = "block";
+        }
+
+        // Render articles by region
+        const articlesDiv = document.getElementById("marketIndicesArticles");
+        if (articlesDiv && data.articles_by_region && Object.keys(data.articles_by_region).length > 0) {
+            const regionOrder = ["미국", "한국", "중국", "홍콩", "일본", "유럽"];
+            const regions = [...new Set([...regionOrder, ...Object.keys(data.articles_by_region)])].filter(r => data.articles_by_region[r]);
+            let html = '<h4 style="margin:0 0 10px;color:#8899aa;font-size:0.88em;letter-spacing:0.03em;">📰 지역별 근거 기사</h4>';
+            for (const region of regions) {
+                const arts = data.articles_by_region[region];
+                if (!arts || arts.length === 0) continue;
+                html += `<div style="margin-bottom:10px;"><span style="font-size:0.82em;font-weight:600;color:#7a8fa6;text-transform:uppercase;letter-spacing:0.04em;">${escapeHtml(region)}</span><ul style="margin:4px 0 0 12px;padding:0;list-style:disc;">`;
+                for (const a of arts) {
+                    const datePart = a.date ? `<span class="article-date">${escapeHtml(a.date)}</span>` : "";
+                    const sourcePart = a.source ? ` <small style="color:#5a6a7a;">(${escapeHtml(a.source)})</small>` : "";
+                    let titleHtml;
+                    if (a.source === "Gmail 메모" && a.snippet) {
+                        titleHtml = `<span style="color:#c8d0da;font-weight:500;">${escapeHtml(a.title)}</span>`
+                            + `<div style="margin-top:3px;padding:4px 7px;background:#1a1a2e;border-left:2px solid #555;font-size:0.82em;color:#a0aab8;white-space:pre-wrap;max-height:100px;overflow-y:auto;">${escapeHtml(a.snippet)}</div>`;
+                    } else {
+                        titleHtml = a.link
+                            ? `<a href="${escapeHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}</a>`
+                            : escapeHtml(a.title);
+                    }
+                    html += `<li style="margin-bottom:4px;font-size:0.85em;">${datePart}${titleHtml}${sourcePart}</li>`;
+                }
+                html += "</ul></div>";
+            }
+            articlesDiv.innerHTML = html;
+            articlesDiv.style.display = "block";
+        } else if (articlesDiv) {
+            articlesDiv.style.display = "none";
         }
 
         marketIndicesSection.style.display = "block";
