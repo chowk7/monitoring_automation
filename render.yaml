@@ -5,11 +5,17 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --timeout 300 --workers 1 --threads 1
     envVars:
+      - key: GEMINI_API_KEY
+        sync: false
       - key: GOOGLE_API_KEY
         sync: false
       - key: GOOGLE_CSE_ID
         sync: false
-      - key: GEMINI_API_KEY
+      - key: NEWS_API_KEY
         sync: false
+      - key: EMAIL_TO
+        sync: false
+      - key: PORT
+        value: "10000"
       - key: PYTHON_VERSION
         value: 3.11.11

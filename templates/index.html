@@ -10,77 +10,30 @@
     <div class="container">
         <header>
             <h1>Stock Movement Analyzer</h1>
-            <p class="subtitle">전일 주가 변동 원인 분석기</p>
+            <p class="subtitle">주가 변동 원인 분석기</p>
         </header>
-
-        <!-- Global Indices Section -->
-        <section class="card indices-section">
-            <div class="section-header">
-                <h2>글로벌 주요 지수</h2>
-                <span id="indicesDate" class="indices-date"></span>
-                <input type="date" id="indicesDatePicker" class="date-picker">
-                <button id="indicesBtn" class="btn btn-indices">조회</button>
-            </div>
-
-            <!-- Loading -->
-            <div id="indicesLoading" style="display:none;">
-                <div class="spinner small-spinner"></div>
-                <p id="indicesLoadingText" class="indices-loading-text">데이터 수집 중...</p>
-            </div>
-
-            <!-- Index Tables -->
-            <div id="indicesData" style="display:none;">
-                <div class="indices-regions">
-                    <div class="indices-region">
-                        <h3 class="region-title us-title">🇺🇸 미국</h3>
-                        <div id="usIndices" class="index-list"></div>
-                    </div>
-                    <div class="indices-region">
-                        <h3 class="region-title asia-title">🌏 아시아</h3>
-                        <div id="asiaIndices" class="index-list"></div>
-                    </div>
-                    <div class="indices-region">
-                        <h3 class="region-title eu-title">🇪🇺 유럽</h3>
-                        <div id="euIndices" class="index-list"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- News Summary -->
-            <div id="indicesNews" style="display:none;">
-                <div class="news-divider"></div>
-                <h3 class="news-title">뉴스 &amp; 시장 분석 <span class="news-badge">Gemini 2.5 Pro</span></h3>
-                <div id="newsSummaryText" class="news-content"></div>
-            </div>
-
-            <!-- Email Send UI -->
-            <div id="emailSection">
-                <div class="news-divider"></div>
-                <div class="email-header">
-                    <span class="email-icon">&#9993;</span>
-                    <span class="email-label">수신자</span>
-                    <span class="email-auto-hint">분석 완료 시 자동 발송</span>
-                </div>
-                <div id="recipientTags" class="recipient-tags"></div>
-                <div class="email-row">
-                    <input type="email" id="emailInput" class="email-input"
-                           placeholder="이메일 입력 후 Enter 또는 추가" autocomplete="email">
-                    <button id="emailAddBtn" class="btn btn-email-add">추가</button>
-                    <button id="emailSendBtn" class="btn btn-email">지금 발송</button>
-                    <span id="emailStatus" class="email-status"></span>
-                </div>
-            </div>
-        </section>
 
         <!-- Ticker Input Section -->
         <section class="card ticker-input-section">
             <h2>Ticker 등록</h2>
-            <div class="input-group">
+            <div class="ticker-add-row">
                 <input type="text" id="tickerInput" placeholder="예: AAPL, 005930.KS"
-                       autocomplete="off" spellcheck="false">
+                       autocomplete="off" spellcheck="false" style="flex:1;min-width:120px;">
+                <input type="text" id="categoryInput" list="categoryList"
+                       placeholder="카테고리 (선택)" autocomplete="off" spellcheck="false"
+                       style="width:130px;">
+                <datalist id="categoryList"></datalist>
                 <button id="addBtn" class="btn btn-add">추가</button>
             </div>
-            <p class="hint">미국 주식: AAPL, TSLA / 한국 주식: 005930.KS (삼성전자), 000660.KS (SK하이닉스)</p>
+            <p class="hint">미국 주식: AAPL, TSLA / 한국 주식: 005930.KS (삼성전자) · 카테고리를 지정하면 그룹별 평균 등락을 확인할 수 있습니다.</p>
+
+            <!-- CSV Upload + Default Reset -->
+            <div class="csv-upload-row">
+                <input type="file" id="csvUploadInput" accept=".csv" style="display:none;">
+                <button id="csvUploadBtn" class="btn btn-upload">📂 CSV 파일로 일괄 추가</button>
+                <button id="resetDefaultsBtn" class="btn btn-upload" style="border-color:#10b981;color:#10b981;">↺ 디폴트 종목 불러오기</button>
+                <span class="hint" style="margin:0;">CSV: Category,Ticker,Name 또는 Ticker 열 형식 지원</span>
+            </div>
         </section>
 
         <!-- Saved Tickers Section -->
@@ -88,14 +41,199 @@
             <div class="section-header">
                 <h2>등록된 Tickers</h2>
                 <span id="tickerCount" class="badge">0</span>
+                <button id="tickerListToggle" class="btn btn-toggle">펼치기 ▼</button>
                 <button id="clearAllBtn" class="btn btn-clear">전체 삭제</button>
             </div>
-            <div id="tickerList" class="ticker-list">
-                <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
+            <div id="tickerListBody" style="display:none;">
+                <div id="tickerList" class="ticker-list">
+                    <p class="empty-message">등록된 Ticker가 없습니다. 위에서 추가해주세요.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Settings Section -->
+        <section class="card settings-section">
+            <div class="section-header">
+                <h2>분석 설정</h2>
+                <button class="btn btn-toggle" id="settingsToggle">펼치기 ▼</button>
+            </div>
+            <div id="settingsBody" style="display:none;">
+                <!-- Change Rate Threshold -->
+                <div class="settings-row">
+                    <label for="thresholdInput">분석 기준 변동률</label>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="number" id="thresholdInput" class="model-select"
+                               min="0.1" max="100" step="0.5" style="width:90px;"
+                               placeholder="5">
+                        <span style="color:var(--text-muted,#aaa);">%</span>
+                        <button id="saveThresholdBtn" class="btn btn-save-model">저장</button>
+                    </div>
+                    <small class="settings-hint">절대 변동률이 이 값 이상인 종목만 AI 분석합니다 (기본값: 5%)</small>
+                </div>
+
+                <!-- Gemini Model Selection (수동 입력 가능) -->
+                <div class="settings-row">
+                    <label for="modelSelect">Gemini 모델</label>
+                    <input type="text" id="modelSelect" class="model-select"
+                           list="geminiModelList" placeholder="모델명 직접 입력 또는 선택"
+                           autocomplete="off" spellcheck="false">
+                    <datalist id="geminiModelList">
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (기본값)</option>
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (빠름)</option>
+                        <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (최고속)</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                        <option value="gemini-2.5-flash-preview-04-17">Gemini 2.5 Flash Preview</option>
+                    </datalist>
+                    <button id="saveModelBtn" class="btn btn-save-model">저장</button>
+                </div>
+
+                <!-- News Search Sources -->
+                <div class="settings-row">
+                    <label>뉴스 기사 검색 소스</label>
+                    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="yahooFinanceEnabled" style="width:15px;height:15px;">
+                            Yahoo Finance
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="newsApiEnabled" style="width:15px;height:15px;">
+                            NewsAPI <span id="newsApiStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="googleCseEnabled" style="width:15px;height:15px;">
+                            Google CSE <span id="googleCseStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="naverEnabled" style="width:15px;height:15px;">
+                            Naver <span id="naverStatus" style="font-size:0.78em;color:#888;"></span>
+                        </label>
+                        <span id="gmailReadStatus" class="status-badge status-unknown">Gmail 메모 확인 중...</span>
+                    </div>
+                    <small class="settings-hint">체크 해제 시 해당 소스 검색 제외 · API 키 미설정 소스는 비활성화됨</small>
+                </div>
+
+                <!-- Gmail 메모 읽기 -->
+                <div class="settings-row">
+                    <label>Gmail 메모 읽기</label>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="gmailReadEnabled" style="width:16px;height:16px;">
+                            활성화
+                        </label>
+                        <input type="text" id="gmailSubjectFilter" class="model-select" style="flex:1;min-width:180px;"
+                               placeholder="제목 필터 (예: 투자메모, 관심종목)"
+                               autocomplete="off" spellcheck="false">
+                        <select id="gmailMaxEmails" class="model-select" style="width:90px;">
+                            <option value="1">최대 1개</option>
+                            <option value="3" selected>최대 3개</option>
+                            <option value="5">최대 5개</option>
+                            <option value="10">최대 10개</option>
+                        </select>
+                        <button id="saveGmailReadBtn" class="btn btn-save-model">저장</button>
+                        <button id="testGmailReadBtn" class="btn" style="background:#555;color:#fff;">연결 테스트</button>
+                    </div>
+                    <small class="settings-hint">발신 Gmail 계정(SMTP_USER)으로 특정 제목의 이메일을 보내두면 분석 시 자동 참고 · Gmail 설정에서 IMAP 사용 활성화 필요</small>
+                    <div id="gmailTestResult" style="display:none;margin-top:10px;padding:12px;border-radius:6px;background:#1e1e2e;border:1px solid #444;font-size:0.85em;max-height:320px;overflow-y:auto;"></div>
+                </div>
+
+                <!-- Custom Search Query -->
+                <div class="settings-row">
+                    <label for="customQueryInput">검색어 템플릿</label>
+                    <input type="text" id="customQueryInput" class="model-select"
+                           placeholder="예: {종목명} stock price (비워두면 기본 검색어 사용)"
+                           autocomplete="off" spellcheck="false">
+                    <button id="saveCustomQueryBtn" class="btn btn-save-model">저장</button>
+                    <small class="settings-hint" style="display:block;margin-top:4px;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code> · NewsAPI, Google CSE 검색어에 적용</small>
+                </div>
+
+                <!-- Gemini Prompt Editor -->
+                <div class="prompt-settings-row">
+                    <div class="prompt-section-header">
+                        <label>Gemini 프롬프트</label>
+                        <button class="btn btn-toggle" id="promptToggle" style="margin-left:0;">펼치기 ▼</button>
+                    </div>
+                    <div id="promptBody" style="display:none;">
+                        <p class="prompt-var-hint" style="margin-top:10px;">
+                            사용 가능한 변수: <code>{name}</code> <code>{ticker}</code> <code>{change_pct}</code> <code>{trade_date}</code>
+                        </p>
+
+                        <p class="prompt-label">📰 뉴스 기사 있을 때 (추가 변수: <code>{articles_text}</code> <code>{sources_label}</code> <code>{articles_count}</code>)</p>
+                        <textarea id="promptWithArticles" class="prompt-textarea" spellcheck="false"></textarea>
+
+                        <p class="prompt-label">🔍 뉴스 기사 없을 때</p>
+                        <textarea id="promptWithoutArticles" class="prompt-textarea" spellcheck="false"></textarea>
+
+                        <div class="prompt-actions">
+                            <button id="savePromptsBtn" class="btn btn-save-model">저장</button>
+                            <button id="resetPromptsBtn" class="btn btn-reset">기본값 복원</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Email Recipients Section -->
+        <section class="card email-section">
+            <div class="section-header">
+                <h2>이메일 수신자</h2>
+                <button class="btn btn-toggle" id="emailToggle">펼치기 ▼</button>
+            </div>
+            <div id="emailBody" style="display:none;">
+                <!-- Default recipients (from ENV) -->
+                <div id="defaultRecipientsSection" style="display:none;">
+                    <p class="recipients-label">기본 수신자 (환경변수 EMAIL_TO)</p>
+                    <div id="defaultRecipientsList" class="recipients-list"></div>
+                </div>
+
+                <!-- Extra recipients (manual input) -->
+                <p class="recipients-label">추가 수신자 (수동 입력)</p>
+                <div class="input-group">
+                    <input type="email" id="emailInput" placeholder="이메일 주소 입력 (예: user@example.com)"
+                           autocomplete="off">
+                    <button id="addEmailBtn" class="btn btn-add">추가</button>
+                </div>
+                <div id="extraRecipientsList" class="recipients-list">
+                    <p class="empty-message">추가 수신자가 없습니다.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- GCS 설정 동기화 -->
+        <section class="card gcs-section" id="gcsSyncSection" style="display:none;">
+            <div class="section-header">
+                <h2>☁ GCS 설정 동기화</h2>
+                <span id="gcsBucketBadge" class="badge" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+            </div>
+            <p class="settings-hint" style="margin:8px 0 12px;">Ticker 목록과 설정값을 GCP Storage 버킷에 저장합니다. 앱 재시작 시 GCS에서 자동으로 불러옵니다.</p>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button id="gcsSaveBtn" class="btn btn-save-model" style="padding:8px 18px;">☁ GCS에 저장</button>
+                <span id="gcsSyncStatus" style="font-size:13px;"></span>
+            </div>
+        </section>
+
+        <!-- Analyze Section (always visible) -->
+        <section class="card analyze-section">
+            <!-- Analysis Date -->
+            <div class="date-row" style="margin-bottom:14px;">
+                <label for="analysisDate">분석 날짜 (KST)</label>
+                <input type="date" id="analysisDate">
+                <span class="date-hint">해당 날짜 주가 기준 · 뉴스 검색은 당일+다음날</span>
             </div>
             <button id="analyzeBtn" class="btn btn-analyze" disabled>
                 <span class="btn-icon">&#9654;</span> 분석 실행
             </button>
+
+            <!-- Webhook Info -->
+            <div class="webhook-info">
+                <span class="webhook-label">🔗 자동 실행 웹훅</span>
+                <code id="webhookUrl" class="webhook-url">로딩 중...</code>
+                <button id="copyWebhookBtn" class="btn btn-copy" title="URL 복사">복사</button>
+                <button id="regenTokenBtn" class="btn btn-copy" style="margin-left:4px;" title="토큰 재생성">재생성</button>
+            </div>
+            <small class="settings-hint" style="display:block;margin-top:6px;">
+                Google Cloud Scheduler에서 위 URL로 POST 요청 설정 · Header: <code>X-Webhook-Token: &lt;token&gt;</code>
+            </small>
         </section>
 
         <!-- Loading Section -->
@@ -105,11 +243,27 @@
             <div class="progress-bar">
                 <div id="progressFill" class="progress-fill"></div>
             </div>
+            <button id="stopBtn" class="btn btn-stop">⏹ 분석 중지</button>
         </section>
 
         <!-- Results Section -->
         <section id="resultsSection" class="card results-section" style="display:none;">
-            <h2>분석 결과</h2>
+            <div class="section-header">
+                <h2>분석 결과</h2>
+                <button id="sendEmailBtn" class="btn btn-email" style="display:none;">
+                    ✉ 이메일 전송
+                </button>
+            </div>
+
+            <!-- Global market indices -->
+            <div id="marketIndicesSection" style="display:none;">
+                <h3 style="margin-bottom:10px;">글로벌 시장 지수</h3>
+                <div id="marketIndicesGrid" class="market-indices-grid"></div>
+                <div id="marketIndicesAnalysis" class="market-analysis-box" style="display:none;"></div>
+            </div>
+
+            <!-- Category averages -->
+            <div id="categoryStats" class="category-stats" style="display:none;"></div>
 
             <!-- All stocks overview -->
             <div id="allStocksOverview" class="stocks-overview"></div>
@@ -124,9 +278,6 @@
         </section>
     </div>
 
-    <script>
-        window.DEFAULT_RECIPIENTS = {{ default_recipients | tojson }};
-    </script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>
