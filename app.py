@@ -1891,9 +1891,11 @@ def run_scheduled_analysis(target_date=None):
         logger.info("Fetching market indices...")
         indices_data = fetch_all_market_indices(target_date)
         trade_date_str = next((i["date"] for i in indices_data if i.get("date")), str(target_date))
+        # News date uses KST (target_date) — earliest timezone, so articles are most likely available
+        news_date_kst = str(target_date)
         articles_by_region = {}
         for region in MARKET_NEWS_REGIONS:
-            arts = search_market_news_for_region(region, trade_date_str, target_date)
+            arts = search_market_news_for_region(region, news_date_kst, target_date)
             if arts:
                 articles_by_region[region] = arts
         market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
@@ -2065,6 +2067,12 @@ def regenerate_webhook_token():
 @app.route("/api/webhook/run-analysis", methods=["POST"])
 def webhook_run_analysis():
     """외부 스케줄러(Google Cloud Scheduler 등)에서 호출하는 웹훅 엔드포인트."""
+    # 토큰 검증
+    expected_token = _get_or_create_webhook_token()
+    provided_token = request.headers.get("X-Webhook-Token", "")
+    if not provided_token or provided_token != expected_token:
+        return jsonify({"error": "Unauthorized"}), 401
+
     # 날짜 파라미터 (없으면 오늘 KST)
     date_str = request.args.get("date", "") or (request.get_json(silent=True) or {}).get("date", "")
     target_date = None
