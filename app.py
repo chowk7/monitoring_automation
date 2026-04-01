@@ -127,7 +127,7 @@ AVAILABLE_GEMINI_MODELS = [
     {"id": "gemini-1.5-flash", "label": "Gemini 1.5 Flash"},
     {"id": "gemini-2.5-flash-preview-04-17", "label": "Gemini 2.5 Flash Preview"},
 ]
-DEFAULT_GEMINI_MODEL = "gemini-2.5-pro"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview"
 
 # Default tickers pre-loaded on first run (list of dicts: ticker, category, name)
 DEFAULT_TICKERS = [
