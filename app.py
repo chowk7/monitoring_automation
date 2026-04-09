@@ -28,6 +28,15 @@ try:
 except ImportError:
     HAS_GCS = False
 
+# APScheduler — background scheduler for daily auto-analysis
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    import pytz as _pytz
+    HAS_SCHEDULER = True
+except ImportError:
+    HAS_SCHEDULER = False
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -287,6 +296,9 @@ DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 # Memory optimization: reuse Gemini client
 _gemini_client = None
 
+# Scheduler singleton
+_scheduler = None
+
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
 ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
@@ -339,6 +351,8 @@ def load_settings():
         "newsapi_enabled": True,
         "google_cse_enabled": True,
         "naver_enabled": True,
+        "auto_schedule_enabled": False,
+        "auto_schedule_time": "09:00",
     }
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -357,6 +371,59 @@ def save_settings(settings):
             json.dump(settings, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Error writing settings: {e}")
+
+
+# ─── Scheduler Management ─────────────────────────────────────────────────────
+
+def _apply_schedule(settings):
+    """설정에 따라 백그라운드 스케줄러를 활성화/비활성화한다. 멱등 함수."""
+    global _scheduler
+    if not HAS_SCHEDULER:
+        logger.warning("APScheduler not installed; auto-schedule unavailable")
+        return
+
+    enabled = settings.get("auto_schedule_enabled", False)
+    time_str = settings.get("auto_schedule_time", "09:00")
+
+    try:
+        hour, minute = [int(x) for x in time_str.split(":")]
+    except (ValueError, AttributeError):
+        logger.error(f"Invalid auto_schedule_time: {time_str!r}; defaulting to 09:00")
+        hour, minute = 9, 0
+
+    kst = _pytz.timezone("Asia/Seoul")
+
+    if _scheduler is None:
+        _scheduler = BackgroundScheduler(timezone=kst)
+        _scheduler.start()
+        logger.info("APScheduler started")
+
+    if _scheduler.get_job("daily_analysis"):
+        _scheduler.remove_job("daily_analysis")
+
+    if enabled:
+        _scheduler.add_job(
+            run_scheduled_analysis,
+            CronTrigger(hour=hour, minute=minute, timezone=kst),
+            id="daily_analysis",
+            name="Daily stock analysis",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
+        logger.info(f"Auto-schedule enabled: daily at {hour:02d}:{minute:02d} KST")
+    else:
+        logger.info("Auto-schedule disabled")
+
+
+def _get_next_run_time():
+    """다음 실행 시각을 KST 문자열로 반환. 없으면 None."""
+    if not HAS_SCHEDULER or _scheduler is None:
+        return None
+    job = _scheduler.get_job("daily_analysis")
+    if job and job.next_run_time:
+        kst = _pytz.timezone("Asia/Seoul")
+        return job.next_run_time.astimezone(kst).strftime("%Y-%m-%d %H:%M KST")
+    return None
 
 
 # ─── CSV Ticker Management ────────────────────────────────────────────────────
@@ -408,6 +475,7 @@ def save_tickers_to_csv(ticker_list):
 
 # ─── GCS Startup Sync ─────────────────────────────────────────────────────────
 startup_sync_from_gcs()
+_apply_schedule(load_settings())
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -617,8 +685,31 @@ def update_settings():
     for key in ["yahoo_finance_enabled", "newsapi_enabled", "google_cse_enabled", "naver_enabled"]:
         if key in data:
             settings[key] = bool(data[key])
+    if "auto_schedule_enabled" in data:
+        settings["auto_schedule_enabled"] = bool(data["auto_schedule_enabled"])
+    if "auto_schedule_time" in data:
+        raw_time = str(data["auto_schedule_time"]).strip()
+        if re.match(r"^\d{2}:\d{2}$", raw_time):
+            h, m = int(raw_time[:2]), int(raw_time[3:])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                settings["auto_schedule_time"] = raw_time
     save_settings(settings)
+    _apply_schedule(settings)
     return jsonify(settings)
+
+
+# ─── Schedule Status Route ────────────────────────────────────────────────────
+
+@app.route("/api/schedule/status", methods=["GET"])
+def schedule_status():
+    """현재 스케줄러 상태와 다음 실행 시각을 반환한다."""
+    settings = load_settings()
+    return jsonify({
+        "enabled": settings.get("auto_schedule_enabled", False),
+        "time": settings.get("auto_schedule_time", "09:00"),
+        "next_run": _get_next_run_time(),
+        "scheduler_available": HAS_SCHEDULER,
+    })
 
 
 # ─── Gmail IMAP Test Route ─────────────────────────────────────────────────────
