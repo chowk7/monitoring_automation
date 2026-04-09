@@ -375,6 +375,12 @@ def save_settings(settings):
 
 # ─── Scheduler Management ─────────────────────────────────────────────────────
 
+def _daily_analysis_job():
+    """APScheduler job 프록시. 호출 시점에 run_scheduled_analysis를 조회하여
+    모듈 로드 순서(forward reference) 문제를 방지한다."""
+    run_scheduled_analysis()
+
+
 def _apply_schedule(settings):
     """설정에 따라 백그라운드 스케줄러를 활성화/비활성화한다. 멱등 함수."""
     global _scheduler
@@ -403,7 +409,7 @@ def _apply_schedule(settings):
 
     if enabled:
         _scheduler.add_job(
-            run_scheduled_analysis,
+            _daily_analysis_job,
             CronTrigger(hour=hour, minute=minute, timezone=kst),
             id="daily_analysis",
             name="Daily stock analysis",
@@ -475,7 +481,10 @@ def save_tickers_to_csv(ticker_list):
 
 # ─── GCS Startup Sync ─────────────────────────────────────────────────────────
 startup_sync_from_gcs()
-_apply_schedule(load_settings())
+try:
+    _apply_schedule(load_settings())
+except Exception as _sched_err:
+    logger.error(f"Failed to initialize auto-schedule at startup: {_sched_err}")
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
