@@ -73,6 +73,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentResults = [];
     // Store market indices data for email
     let currentMarketData = null;
+    // Store all stocks and category stats for email
+    let currentAllStocks = null;
+    let currentCategoryStats = null;
     // Store default prompts for reset
     let defaultPrompts = { with_articles: "", without_articles: "" };
     // Active EventSource (for stop functionality)
@@ -734,7 +737,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/send-email", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ results: currentResults, market_data: currentMarketData }),
+                body: JSON.stringify({
+                    results: currentResults,
+                    market_data: currentMarketData,
+                    all_stocks: currentAllStocks,
+                    category_stats: currentCategoryStats,
+                }),
             });
             const data = await resp.json();
             if (resp.ok) {
@@ -951,6 +959,8 @@ document.addEventListener("DOMContentLoaded", () => {
         analysisResults.innerHTML = "";
         currentResults = [];
         currentMarketData = null;
+        currentAllStocks = null;
+        currentCategoryStats = null;
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
 
@@ -1001,6 +1011,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     case "stocks":
                         resultsSection.style.display = "block";
+                        currentAllStocks = data.all_stocks || null;
+                        currentCategoryStats = data.category_stats || null;
                         if (data.category_stats) renderCategoryStats(data.category_stats);
                         renderAllStocksOverview(data.all_stocks);
                         break;

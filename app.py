@@ -1976,7 +1976,9 @@ def run_scheduled_analysis(target_date=None):
     try:
         logger.info("Scheduled analysis started")
         if target_date is None:
-            target_date = get_kst_today()
+            # 기본값: 어제(KST) — 웹페이지 기본값과 동일하게 맞춤
+            # 장 마감 후 당일 실행 시에도 전일 데이터를 분석하도록 어제 날짜 사용
+            target_date = get_kst_today() - timedelta(days=1)
 
         settings = load_settings()
         model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
