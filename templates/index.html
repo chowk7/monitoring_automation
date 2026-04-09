@@ -137,6 +137,23 @@
                     <div id="gmailTestResult" style="display:none;margin-top:10px;padding:12px;border-radius:6px;background:#1e1e2e;border:1px solid #444;font-size:0.85em;max-height:320px;overflow-y:auto;"></div>
                 </div>
 
+                <!-- Auto Schedule -->
+                <div class="settings-row">
+                    <label>자동 분석 스케줄</label>
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;cursor:pointer;">
+                            <input type="checkbox" id="autoScheduleEnabled" style="width:16px;height:16px;">
+                            활성화
+                        </label>
+                        <input type="time" id="autoScheduleTime" class="model-select"
+                               style="width:110px;" value="09:00">
+                        <button id="saveAutoScheduleBtn" class="btn btn-save-model">저장</button>
+                        <span id="autoScheduleStatus" class="status-badge status-unknown"
+                              style="display:none;"></span>
+                    </div>
+                    <small class="settings-hint">매일 지정 시각(KST)에 자동으로 분석 후 이메일 발송 · 앱 재시작 후에도 설정 유지</small>
+                </div>
+
                 <!-- Custom Search Query -->
                 <div class="settings-row">
                     <label for="customQueryInput">검색어 템플릿</label>

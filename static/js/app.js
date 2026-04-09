@@ -87,6 +87,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     loadTickers();
     loadSettings();
+    loadScheduleStatus();
     loadEmailRecipients();
     loadWebhookInfo();
 
@@ -198,6 +199,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const testGmailReadBtn = document.getElementById("testGmailReadBtn");
     if (testGmailReadBtn) {
         testGmailReadBtn.addEventListener("click", testGmailRead);
+    }
+
+    const saveAutoScheduleBtn = document.getElementById("saveAutoScheduleBtn");
+    if (saveAutoScheduleBtn) {
+        saveAutoScheduleBtn.addEventListener("click", saveAutoSchedule);
     }
 
     // News source toggles — auto-save on change
@@ -332,6 +338,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (thresholdInput) thresholdInput.value = currentThreshold;
             }
 
+            // Load auto-schedule settings
+            const autoScheduleEnabledEl = document.getElementById("autoScheduleEnabled");
+            const autoScheduleTimeEl = document.getElementById("autoScheduleTime");
+            if (autoScheduleEnabledEl) autoScheduleEnabledEl.checked = !!data.auto_schedule_enabled;
+            if (autoScheduleTimeEl && data.auto_schedule_time) autoScheduleTimeEl.value = data.auto_schedule_time;
+            loadScheduleStatus();
+
         } catch (err) {
             console.error("Failed to load settings:", err);
         }
@@ -449,6 +462,57 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             showError("저장 오류");
+        }
+    }
+
+    async function saveAutoSchedule() {
+        const enabled = document.getElementById("autoScheduleEnabled")?.checked || false;
+        const time = document.getElementById("autoScheduleTime")?.value || "09:00";
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    auto_schedule_enabled: enabled,
+                    auto_schedule_time: time,
+                }),
+            });
+            if (resp.ok) {
+                showSuccess(enabled ? `자동 분석 예약됨: 매일 ${time} KST` : "자동 분석 비활성화됨");
+                loadScheduleStatus();
+            } else {
+                showError("저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
+        }
+    }
+
+    async function loadScheduleStatus() {
+        const statusEl = document.getElementById("autoScheduleStatus");
+        if (!statusEl) return;
+        try {
+            const resp = await fetch("/api/schedule/status");
+            const data = await resp.json();
+            if (!data.scheduler_available) {
+                statusEl.textContent = "스케줄러 미설치";
+                statusEl.className = "status-badge status-inactive";
+                statusEl.style.display = "";
+                return;
+            }
+            if (data.enabled && data.next_run) {
+                statusEl.textContent = `다음 실행: ${data.next_run}`;
+                statusEl.className = "status-badge status-active";
+                statusEl.style.display = "";
+            } else if (data.enabled) {
+                statusEl.textContent = "활성화됨";
+                statusEl.className = "status-badge status-active";
+                statusEl.style.display = "";
+            } else {
+                statusEl.style.display = "none";
+            }
+        } catch {
+            // silently ignore
         }
     }
 
