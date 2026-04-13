@@ -840,177 +840,48 @@ def send_email_report():
 
 
 def build_email_html(results, date_str, market_data=None, all_stocks=None, category_stats=None):
-    """Build HTML content for email report."""
-    # ── 색 헬퍼 (흰 바탕 기준) ──────────────────────────────────────
+    """Build HTML content for email report.
+    형식: 회사명(변동률): 분석내용 — 간결한 한 줄 요약 스타일.
+    """
     def chg_color(v):
         return "#c0392b" if v < 0 else "#27ae60" if v > 0 else "#555"
 
-    # ── 글로벌 시장 지수 섹션 ─────────────────────────────────────────
-    market_section = ""
-    if market_data and market_data.get("indices"):
-        idx_rows = ""
-        for idx in market_data["indices"]:
-            chg = idx.get("change_pct", 0)
-            color = chg_color(chg)
-            sign = "+" if chg > 0 else ""
-            err_note = ' <small style="color:#999;">(오류)</small>' if idx.get("error") else ""
-            idx_rows += (
-                f'<tr>'
-                f'<td style="padding:6px 12px;color:#333;">{idx["name"]}'
-                f'<small style="color:#888;margin-left:4px;">({idx["region"]})</small></td>'
-                f'<td style="padding:6px 12px;color:{color};font-weight:bold;">{sign}{chg:.2f}%{err_note}</td>'
-                f'</tr>'
-            )
-        analysis_html = (market_data.get("analysis") or "").replace("\n", "<br>")
-        market_section = f"""
-        <h2 style="color:#1a56db;margin-top:24px;margin-bottom:8px;">글로벌 시장 지수</h2>
-        <table style="width:100%;border-collapse:collapse;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;margin-bottom:12px;">
-            {idx_rows}
-        </table>
-        <div style="background:#f0f4ff;padding:12px;border-radius:6px;color:#333;line-height:1.6;margin-bottom:20px;border:1px solid #c7d7fc;">
-            <strong style="color:#1a56db;">시장 분석</strong><br>{analysis_html}
-        </div>
-        """
-
-    # ── 카테고리별 등락률 섹션 ────────────────────────────────────────
-    category_section = ""
-    if category_stats:
-        sorted_cats = sorted(category_stats.items(), key=lambda x: x[1].get("avg", 0), reverse=True)
-        cat_rows = ""
-        for cat, stat in sorted_cats:
-            avg = stat.get("avg", 0)
-            color = chg_color(avg)
-            sign = "+" if avg > 0 else ""
-            count = stat.get("count", 0)
-            cat_rows += (
-                f'<tr>'
-                f'<td style="padding:6px 12px;color:#333;font-weight:500;">{cat}</td>'
-                f'<td style="padding:6px 12px;color:{color};font-weight:bold;">{sign}{avg:.2f}%</td>'
-                f'<td style="padding:6px 12px;color:#666;font-size:12px;">{count}개 종목 평균</td>'
-                f'</tr>'
-            )
-        category_section = f"""
-        <h2 style="color:#1a56db;margin-top:24px;margin-bottom:8px;">카테고리별 등락률</h2>
-        <table style="width:100%;border-collapse:collapse;background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;margin-bottom:20px;">
-            <thead>
-                <tr style="background:#e9ecef;">
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:13px;">카테고리</th>
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:13px;">평균 등락률</th>
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:13px;">비고</th>
-                </tr>
-            </thead>
-            <tbody>{cat_rows}</tbody>
-        </table>
-        """
-
-    # ── 전체 종목 등락률 섹션 ─────────────────────────────────────────
-    all_stocks_section = ""
-    if all_stocks:
-        # 카테고리별로 묶기
-        by_cat = {}
-        for ticker, info in all_stocks.items():
-            cat = info.get("category") or "기타"
-            by_cat.setdefault(cat, []).append((ticker, info))
-        # 카테고리 순서: category_stats의 avg 순
-        cat_order = sorted(by_cat.keys(), key=lambda c: (category_stats or {}).get(c, {}).get("avg", 0), reverse=True)
-
-        all_rows = ""
-        for cat in cat_order:
-            items = by_cat[cat]
-            items.sort(key=lambda x: x[1].get("change_pct", 0), reverse=True)
-            # 카테고리 헤더 행
-            all_rows += (
-                f'<tr style="background:#e9ecef;">'
-                f'<td colspan="3" style="padding:6px 12px;font-weight:bold;color:#343a40;font-size:13px;">{cat}</td>'
-                f'</tr>'
-            )
-            for ticker, info in items:
-                chg = info.get("change_pct", 0)
-                color = chg_color(chg)
-                sign = "+" if chg > 0 else ""
-                err_note = ' <small style="color:#999;">(오류)</small>' if info.get("error") else ""
-                all_rows += (
-                    f'<tr style="border-bottom:1px solid #f0f0f0;">'
-                    f'<td style="padding:5px 12px;color:#555;font-size:12px;">{ticker}</td>'
-                    f'<td style="padding:5px 12px;color:#333;font-size:12px;">{info.get("name","")}</td>'
-                    f'<td style="padding:5px 12px;color:{color};font-weight:bold;font-size:12px;">{sign}{chg:.2f}%{err_note}</td>'
-                    f'</tr>'
-                )
-
-        all_stocks_section = f"""
-        <h2 style="color:#1a56db;margin-top:24px;margin-bottom:8px;">전체 종목 등락률</h2>
-        <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;margin-bottom:20px;">
-            <thead>
-                <tr style="background:#e9ecef;">
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:12px;">티커</th>
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:12px;">종목명</th>
-                    <th style="padding:8px 12px;text-align:left;color:#495057;font-size:12px;">등락률</th>
-                </tr>
-            </thead>
-            <tbody>{all_rows}</tbody>
-        </table>
-        """
-
-    # ── 분석 결과 섹션 ────────────────────────────────────────────────
     rows = ""
     for r in results:
         sign = "+" if r["change_pct"] > 0 else ""
         color = chg_color(r["change_pct"])
-        analysis_text = r.get("analysis", "").replace("\n", "<br>")
-        news_badge = ""
-        if r.get("articles_found"):
-            news_badge = '<span style="background:#1a56db;color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;margin-left:6px;">뉴스 참고</span>'
+        analysis_text = r.get("analysis", "").replace("\n", " ").strip()
+        label = f"{r['name']}({sign}{r['change_pct']:.1f}%)"
+        rows += (
+            f'<tr style="border-bottom:1px solid #e9ecef;">'
+            f'<td style="padding:8px 14px;white-space:nowrap;font-weight:bold;color:{color};">{label}</td>'
+            f'<td style="padding:8px 14px;color:#222;line-height:1.5;">{analysis_text}</td>'
+            f'</tr>'
+        )
 
-        articles_html = ""
-        if r.get("articles"):
-            article_items = ""
-            for a in r["articles"]:
-                date_part = f'<span style="color:#999;font-size:10px;margin-right:6px;">{a["date"]}</span>' if a.get("date") else ""
-                if a.get("link"):
-                    article_items += f'<li style="padding:3px 0;">{date_part}<a href="{a["link"]}" style="color:#1a56db;">{a["title"]}</a> <small style="color:#999;">({a.get("source","")})</small></li>'
-                else:
-                    article_items += f'<li style="padding:3px 0;">{date_part}{a["title"]} <small style="color:#999;">({a.get("source","")})</small></li>'
-            articles_html = f'<ul style="margin:8px 0 0 0;padding-left:16px;font-size:12px;color:#333;">{article_items}</ul>'
-
-        rows += f"""
-        <tr>
-            <td style="padding:12px;border-bottom:1px solid #e9ecef;">
-                <strong style="color:#111;">{r['name']}</strong> <span style="color:#666;">({r['ticker']})</span>
-                <span style="color:{color};font-weight:bold;margin-left:8px;">{sign}{r['change_pct']:.1f}%</span>
-                {news_badge}
-                <br><small style="color:#888;">{r.get('model_used', 'Gemini')}</small>
-                <div style="margin-top:8px;color:#333;line-height:1.6;">{analysis_text}</div>
-                {articles_html}
-            </td>
-        </tr>
-        """
-
-    analysis_section = ""
-    if rows:
-        analysis_section = f"""
-        <h2 style="color:#1a56db;margin-bottom:8px;">변동 종목 분석</h2>
-        <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;">
-            {rows}
-        </table>
-        """
-
-    return f"""
+    body = f"""
     <!DOCTYPE html>
     <html>
     <head><meta charset="UTF-8"></head>
     <body style="background:#ffffff;color:#111111;font-family:Arial,sans-serif;margin:0;padding:20px;">
         <div style="max-width:760px;margin:0 auto;">
-            <h1 style="color:#1a56db;margin-bottom:4px;">Stock Movement Analyzer</h1>
-            <p style="color:#555;margin-top:0;">분석 날짜: {date_str}</p>
-            {market_section}
-            {category_section}
-            {all_stocks_section}
-            {analysis_section}
-            <p style="color:#aaa;font-size:12px;margin-top:16px;">This report was automatically generated by Stock Movement Analyzer.</p>
+            <h2 style="color:#1a56db;margin-bottom:4px;">주가 변동 분석 리포트</h2>
+            <p style="color:#888;margin-top:0;font-size:13px;">분석 날짜: {date_str}</p>
+            <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;">
+                <thead>
+                    <tr style="background:#f0f4ff;">
+                        <th style="padding:8px 14px;text-align:left;color:#1a56db;font-size:13px;white-space:nowrap;">종목 (변동률)</th>
+                        <th style="padding:8px 14px;text-align:left;color:#1a56db;font-size:13px;">분석 내용</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </table>
+            <p style="color:#bbb;font-size:11px;margin-top:12px;">Stock Movement Analyzer — 자동 생성 리포트</p>
         </div>
     </body>
     </html>
     """
+    return body
 
 
 @app.route("/api/market-indices", methods=["GET"])
