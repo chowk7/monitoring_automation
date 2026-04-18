@@ -867,7 +867,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
         if v < 0:
             return f'<span style="color:#cc0000;">△{abs(v):.{decimals}f}%</span>'
         else:
-            return f'<span style="color:#0066cc;">{v:.{decimals}f}%</span>'
+            return f'<span style="color:#0000FF;">{v:.{decimals}f}%</span>'
 
     try:
         d = date_cls.fromisoformat(date_str)
