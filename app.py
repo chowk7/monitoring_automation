@@ -840,47 +840,95 @@ def send_email_report():
 
 
 def build_email_html(results, date_str, market_data=None, all_stocks=None, category_stats=None):
-    """Build HTML content for email report.
-    형식: 회사명(변동률): 분석내용 — 간결한 한 줄 요약 스타일.
-    """
-    def chg_color(v):
-        return "#c0392b" if v < 0 else "#27ae60" if v > 0 else "#555"
+    """Build HTML email in 맑은고딕 10.5pt with 시장/개별회사 sections."""
+    from datetime import date as date_cls
 
-    rows = ""
+    INDEX_DISPLAY_NAMES = {
+        "^DJI":       "Dow",
+        "^IXIC":      "Nasdaq",
+        "^GSPC":      "S&amp;P 500",
+        "^KS11":      "韓코스피",
+        "^KQ11":      "코스닥",
+        "000001.SS":  "中상해",
+        "^HSI":       "홍콩항셍",
+        "^N225":      "日니케이",
+        "^FTSE":      "英FTSE",
+        "^FCHI":      "CAC",
+        "^GDAXI":     "獨DAX",
+    }
+
+    REGION_GROUPS = [
+        ("미&nbsp;&nbsp;국", ["미국"]),
+        ("아시아",           ["한국", "중국", "홍콩", "일본"]),
+        ("유&nbsp;&nbsp;럽", ["영국", "프랑스", "독일"]),
+    ]
+
+    def fmt_chg(v, decimals=2):
+        if v < 0:
+            return f'<span style="color:#cc0000;">△{abs(v):.{decimals}f}%</span>'
+        else:
+            return f'<span style="color:#0066cc;">{v:.{decimals}f}%</span>'
+
+    try:
+        d = date_cls.fromisoformat(date_str)
+        date_label = f"{d.month:02d}/{d.day:02d}"
+    except Exception:
+        date_label = date_str
+
+    font_style = "font-family:'맑은고딕',Malgun Gothic,Arial,sans-serif;font-size:10.5pt;"
+
+    # Build 시장 section
+    market_lines = ""
+    if market_data:
+        index_by_ticker = {m["ticker"]: m for m in market_data if not m.get("error")}
+        for region_label, regions in REGION_GROUPS:
+            tickers_in_group = [
+                idx["ticker"] for idx in MARKET_INDICES if idx["region"] in regions
+            ]
+            items = []
+            for ticker in tickers_in_group:
+                if ticker in index_by_ticker:
+                    m = index_by_ticker[ticker]
+                    display = INDEX_DISPLAY_NAMES.get(ticker, m.get("name", ticker))
+                    items.append(f"{display} ({fmt_chg(m['change_pct'], 2)})")
+            if items:
+                market_lines += (
+                    f'<p style="{font_style}margin:2px 0;">'
+                    f'&nbsp;&nbsp;- {region_label} :&nbsp;&nbsp;'
+                    + ",&nbsp;".join(items)
+                    + "</p>"
+                )
+
+    # Build 개별회사 section
+    company_lines = ""
     for r in results:
-        sign = "+" if r["change_pct"] > 0 else ""
-        color = chg_color(r["change_pct"])
         analysis_text = r.get("analysis", "").replace("\n", " ").strip()
-        label = f"{r['name']}({sign}{r['change_pct']:.1f}%)"
-        rows += (
-            f'<tr style="border-bottom:1px solid #e9ecef;">'
-            f'<td style="padding:8px 14px;white-space:nowrap;font-weight:bold;color:{color};">{label}</td>'
-            f'<td style="padding:8px 14px;color:#222;line-height:1.5;">{analysis_text}</td>'
-            f'</tr>'
+        chg_html = fmt_chg(r["change_pct"], 1)
+        company_lines += (
+            f'<p style="{font_style}margin:2px 0;">'
+            f'- {r["name"]} ({chg_html}) : {analysis_text}'
+            f'</p>'
         )
 
-    body = f"""
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"></head>
-    <body style="background:#ffffff;color:#111111;font-family:Arial,sans-serif;margin:0;padding:20px;">
-        <div style="max-width:760px;margin:0 auto;">
-            <h2 style="color:#1a56db;margin-bottom:4px;">주가 변동 분석 리포트</h2>
-            <p style="color:#888;margin-top:0;font-size:13px;">분석 날짜: {date_str}</p>
-            <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #dee2e6;border-radius:6px;overflow:hidden;">
-                <thead>
-                    <tr style="background:#f0f4ff;">
-                        <th style="padding:8px 14px;text-align:left;color:#1a56db;font-size:13px;white-space:nowrap;">종목 (변동률)</th>
-                        <th style="padding:8px 14px;text-align:left;color:#1a56db;font-size:13px;">분석 내용</th>
-                    </tr>
-                </thead>
-                <tbody>{rows}</tbody>
-            </table>
-            <p style="color:#bbb;font-size:11px;margin-top:12px;">Stock Movement Analyzer — 자동 생성 리포트</p>
-        </div>
-    </body>
-    </html>
-    """
+    market_section = ""
+    if market_lines:
+        market_section = (
+            f'<p style="{font_style}margin:6px 0;"><b>시&nbsp;&nbsp;장</b></p>'
+            + market_lines
+            + '<br>'
+        )
+
+    body = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="background:#ffffff;color:#111111;{font_style}margin:0;padding:20px;">
+<p style="{font_style}margin:4px 0;">안녕하십니까,</p>
+<p style="{font_style}margin:4px 0;">{date_label}일 종가기준 모니터링 업체 현황 송부드립니다.</p>
+<br>
+{market_section}<p style="{font_style}margin:6px 0;"><b>개별회사</b></p>
+{company_lines}
+</body>
+</html>"""
     return body
 
 
