@@ -880,7 +880,8 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
     # Build 시장 section
     market_lines = ""
     if market_data:
-        index_by_ticker = {m["ticker"]: m for m in market_data if not m.get("error")}
+        indices_list = market_data.get("indices", market_data) if isinstance(market_data, dict) else market_data
+        index_by_ticker = {m["ticker"]: m for m in indices_list if isinstance(m, dict) and not m.get("error")}
         for region_label, regions in REGION_GROUPS:
             tickers_in_group = [
                 idx["ticker"] for idx in MARKET_INDICES if idx["region"] in regions
