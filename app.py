@@ -1258,9 +1258,12 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        # Deduplicate: keep the last bar per local date (adjusted by exchange timezone)
-        # (Yahoo Finance sometimes returns 2 bars for the same day, e.g. open + close snapshot)
-        tz_offset = timedelta(hours=tz_hours)
+        # Use gmtoffset from Yahoo Finance meta (seconds); fallback to tz_hours
+        gmt_offset_sec = meta.get("gmtoffset", tz_hours * 3600)
+        tz_offset = timedelta(seconds=gmt_offset_sec)
+
+        # Deduplicate: keep the last bar per local exchange date
+        # (Yahoo Finance timestamps are UTC; add exchange offset to get local date)
         seen: dict = {}
         for ts, c in valid:
             seen[(datetime.utcfromtimestamp(ts) + tz_offset).date()] = (ts, c)
