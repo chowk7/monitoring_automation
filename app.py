@@ -1258,16 +1258,17 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        # Deduplicate: keep the last bar per UTC date
+        # Deduplicate: keep the last bar per local date (adjusted by exchange timezone)
         # (Yahoo Finance sometimes returns 2 bars for the same day, e.g. open + close snapshot)
+        tz_offset = timedelta(hours=tz_hours)
         seen: dict = {}
         for ts, c in valid:
-            seen[datetime.utcfromtimestamp(ts).date()] = (ts, c)
+            seen[(datetime.utcfromtimestamp(ts) + tz_offset).date()] = (ts, c)
         valid = sorted(seen.values())
 
         if target_date:
             filtered = [(ts, c) for ts, c in valid
-                        if datetime.utcfromtimestamp(ts).date() <= target_date]
+                        if (datetime.utcfromtimestamp(ts) + tz_offset).date() <= target_date]
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1281,7 +1282,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.utcfromtimestamp(valid[-1][0]).date()
+        last_date = (datetime.utcfromtimestamp(valid[-1][0]) + tz_offset).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
