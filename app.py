@@ -1440,16 +1440,32 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         tz_offset = timedelta(hours=tz_hours)
 
-        # Deduplicate: keep the last bar per local exchange date
-        # (Yahoo Finance timestamps are UTC; add exchange offset to get local date)
+        # --- 진단 로그: Yahoo Finance 원본 타임스탬프 확인 ---
+        if tz_hours != 0 and valid:
+            diag = [
+                f"{datetime.utcfromtimestamp(ts).strftime('%m/%d %H:%M')}UTC"
+                f"→{(datetime.utcfromtimestamp(ts)+tz_offset).date()}"
+                for ts, _ in valid[-4:]
+            ]
+            logger.info(f"[{ticker_symbol}] tz={tz_hours}h target={target_date} "
+                        f"last4bars={diag} meta_gmtoffset={meta.get('gmtoffset')} "
+                        f"meta_tz={meta.get('exchangeTimezoneName')}")
+
+        # Deduplicate: keep the last bar per local exchange date.
+        # Yahoo Finance timestamps are UTC; add tz_offset to get local date.
         seen: dict = {}
         for ts, c in valid:
             seen[(datetime.utcfromtimestamp(ts) + tz_offset).date()] = (ts, c)
         valid = sorted(seen.values())
 
         if target_date:
+            # Yahoo Finance often assigns Asian index bars (tz_hours > 0) a timestamp
+            # of the NEXT UTC midnight (e.g. 4/21 KST close → ts = 4/22 00:00 UTC).
+            # Adding tz_offset then gives 4/22, which > target_date and gets filtered out.
+            # Fix: accept UTC dates up to target_date+1 for positive-tz markets.
+            utc_ceiling = target_date + timedelta(days=1) if tz_hours > 0 else target_date
             filtered = [(ts, c) for ts, c in valid
-                        if (datetime.utcfromtimestamp(ts) + tz_offset).date() <= target_date]
+                        if datetime.utcfromtimestamp(ts).date() <= utc_ceiling]
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1463,7 +1479,10 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = (datetime.utcfromtimestamp(valid[-1][0]) + tz_offset).date()
+        # Cap last_date to target_date: if Yahoo Finance's next-day convention was used,
+        # (ts + tz_offset) gives target_date+1, but the actual trading date is target_date.
+        _raw_last_date = (datetime.utcfromtimestamp(valid[-1][0]) + tz_offset).date()
+        last_date = min(_raw_last_date, target_date) if target_date else _raw_last_date
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
