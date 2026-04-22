@@ -50,8 +50,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const tickerListToggle = document.getElementById("tickerListToggle");
     const tickerListBody = document.getElementById("tickerListBody");
 
-    // Custom query elements
+    // Custom query elements (shared + per-source)
     const customQueryInput = document.getElementById("customQueryInput");
+    const customQueryNewsapi = document.getElementById("customQueryNewsapi");
+    const customQueryGoogle = document.getElementById("customQueryGoogle");
+    const customQueryNaver = document.getElementById("customQueryNaver");
     const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
 
     // Threshold elements
@@ -330,10 +333,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 promptWithoutArticles.value = data.prompt_without_articles || data.default_prompt_without_articles || "";
             }
 
-            // Load custom query
-            if (customQueryInput) {
-                customQueryInput.value = data.custom_query || "";
-            }
+            // Load custom query (shared + per-source)
+            if (customQueryInput)   customQueryInput.value   = data.custom_query          || "";
+            if (customQueryNewsapi) customQueryNewsapi.value = data.custom_query_newsapi  || "";
+            if (customQueryGoogle)  customQueryGoogle.value  = data.custom_query_google   || "";
+            if (customQueryNaver)   customQueryNaver.value   = data.custom_query_naver    || "";
 
             // Load change threshold
             if (data.change_threshold !== undefined) {
@@ -415,15 +419,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function saveCustomQuery() {
-        const query = customQueryInput ? customQueryInput.value.trim() : "";
+        const payload = {
+            custom_query:         customQueryInput   ? customQueryInput.value.trim()   : "",
+            custom_query_newsapi: customQueryNewsapi ? customQueryNewsapi.value.trim() : "",
+            custom_query_google:  customQueryGoogle  ? customQueryGoogle.value.trim()  : "",
+            custom_query_naver:   customQueryNaver   ? customQueryNaver.value.trim()   : "",
+        };
         try {
             const resp = await fetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ custom_query: query }),
+                body: JSON.stringify(payload),
             });
             if (resp.ok) {
-                showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
+                showSuccess("검색어 템플릿 저장됨");
             } else {
                 showError("저장 실패");
             }

@@ -154,14 +154,37 @@
                     <small class="settings-hint">매일 지정 시각(KST)에 자동으로 분석 후 이메일 발송 · 앱 재시작 후에도 설정 유지</small>
                 </div>
 
-                <!-- Custom Search Query -->
+                <!-- Custom Search Query (per-source) -->
                 <div class="settings-row">
-                    <label for="customQueryInput">검색어 템플릿</label>
-                    <input type="text" id="customQueryInput" class="model-select"
-                           placeholder="예: {종목명} stock price (비워두면 기본 검색어 사용)"
-                           autocomplete="off" spellcheck="false">
-                    <button id="saveCustomQueryBtn" class="btn btn-save-model">저장</button>
-                    <small class="settings-hint" style="display:block;margin-top:4px;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code> · NewsAPI, Google CSE 검색어에 적용</small>
+                    <label>검색어 템플릿</label>
+                    <div style="display:flex;flex-direction:column;gap:6px;flex:1;">
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="min-width:90px;font-size:12px;color:#555;">NewsAPI</span>
+                            <input type="text" id="customQueryNewsapi" class="model-select" style="flex:1;"
+                                   placeholder="예: {종목명} stock (비워두면 공통 검색어 사용)"
+                                   autocomplete="off" spellcheck="false">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="min-width:90px;font-size:12px;color:#555;">Google CSE</span>
+                            <input type="text" id="customQueryGoogle" class="model-select" style="flex:1;"
+                                   placeholder="예: {종목명} 주가 (비워두면 공통 검색어 사용)"
+                                   autocomplete="off" spellcheck="false">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="min-width:90px;font-size:12px;color:#555;">Naver</span>
+                            <input type="text" id="customQueryNaver" class="model-select" style="flex:1;"
+                                   placeholder="예: {종목명} 뉴스 (비워두면 공통 검색어 사용)"
+                                   autocomplete="off" spellcheck="false">
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <span style="min-width:90px;font-size:12px;color:#555;">공통</span>
+                            <input type="text" id="customQueryInput" class="model-select" style="flex:1;"
+                                   placeholder="소스별 미지정 시 적용되는 기본 검색어"
+                                   autocomplete="off" spellcheck="false">
+                        </div>
+                    </div>
+                    <button id="saveCustomQueryBtn" class="btn btn-save-model" style="align-self:flex-start;">저장</button>
+                    <small class="settings-hint" style="display:block;margin-top:4px;width:100%;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code></small>
                 </div>
 
                 <!-- Gemini Prompt Editor -->

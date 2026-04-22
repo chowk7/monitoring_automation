@@ -343,6 +343,9 @@ def load_settings():
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
         "custom_query": "",
+        "custom_query_newsapi": "",
+        "custom_query_google": "",
+        "custom_query_naver": "",
         "change_threshold": 5.0,
         "gmail_read_enabled": False,
         "gmail_subject_filter": "",
@@ -671,8 +674,9 @@ def update_settings():
         settings["prompt_with_articles"] = data["prompt_with_articles"]
     if "prompt_without_articles" in data:
         settings["prompt_without_articles"] = data["prompt_without_articles"]
-    if "custom_query" in data:
-        settings["custom_query"] = data["custom_query"]
+    for key in ["custom_query", "custom_query_newsapi", "custom_query_google", "custom_query_naver"]:
+        if key in data:
+            settings[key] = str(data[key])
     if "change_threshold" in data:
         try:
             val = float(data["change_threshold"])
@@ -1292,9 +1296,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        # Use gmtoffset from Yahoo Finance meta (seconds); fallback to tz_hours
-        gmt_offset_sec = meta.get("gmtoffset", tz_hours * 3600)
-        tz_offset = timedelta(seconds=gmt_offset_sec)
+        tz_offset = timedelta(hours=tz_hours)
 
         # Deduplicate: keep the last bar per local exchange date
         # (Yahoo Finance timestamps are UTC; add exchange offset to get local date)
@@ -1820,25 +1822,31 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
     all_articles = []
     settings = load_settings()
 
+    # Per-source query: caller-supplied → source-specific setting → shared custom_query → ""
+    shared_q = custom_query if custom_query is not None else settings.get("custom_query", "")
+    newsapi_q = settings.get("custom_query_newsapi") or shared_q
+    google_q  = settings.get("custom_query_google")  or shared_q
+    naver_q   = settings.get("custom_query_naver")   or shared_q
+
     # 1. Yahoo Finance — always available (uses ticker directly, not text query)
     if settings.get("yahoo_finance_enabled", True):
         all_articles.extend(search_news_articles_yahoo_finance(ticker, company_name))
 
     # 2. NewsAPI — optional
     if NEWS_API_KEY and settings.get("newsapi_enabled", True):
-        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=newsapi_q))
 
     # 3. Google CSE — optional
     if GOOGLE_API_KEY and GOOGLE_CSE_ID and settings.get("google_cse_enabled", True):
-        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=google_q))
 
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
-        logger.debug("Naver skipped: NAVER_CLIENT_ID or NAVER_CLIENT_SECRET not set")
+        logger.warning("Naver skipped: NAVER_CLIENT_ID or NAVER_CLIENT_SECRET not set")
     elif not settings.get("naver_enabled", True):
-        logger.debug("Naver skipped: naver_enabled=false in settings")
+        logger.warning("Naver skipped: naver_enabled=false in settings")
     else:
-        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=naver_q))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
     if gmail_articles is not None:
@@ -1859,12 +1867,11 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
             seen_titles.add(t)
             unique.append(a)
 
-    # Filter by date: keep articles from (target_date - 1 day) or later.
-    # Allowing one day back because relevant news (pre-market, after-hours)
-    # may have been published the day before and still explain that day's movement.
+    # Filter by date: keep articles up to 7 days before target_date.
+    # Wide window to cover weekends/holidays (e.g. Monday analysis needs Friday articles).
     # Articles with no date field are always kept (date unknown).
     if target_date:
-        date_threshold = str(target_date - timedelta(days=1))
+        date_threshold = str(target_date - timedelta(days=7))
         date_filtered = [
             a for a in unique
             if not a.get("date") or a["date"] >= date_threshold
