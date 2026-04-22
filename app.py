@@ -1867,11 +1867,10 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
             seen_titles.add(t)
             unique.append(a)
 
-    # Filter by date: keep articles up to 3 days before target_date.
-    # 3 days covers Monday analysis (Friday = 3 days back) and normal weekends.
+    # Filter by date: keep articles from target_date or later.
     # Articles with no date field are always kept (date unknown).
     if target_date:
-        date_threshold = str(target_date - timedelta(days=3))
+        date_threshold = str(target_date)
         date_filtered = [
             a for a in unique
             if not a.get("date") or a["date"] >= date_threshold
