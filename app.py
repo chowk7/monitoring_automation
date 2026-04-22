@@ -1655,13 +1655,16 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
             logger.error(f"Naver Search API returned errorCode for '{query}': {data}")
             return []
 
+        import html as _html
         from email.utils import parsedate as _naver_parsedate
         articles = []
         for item in data.get("items", []):
-            title = _HTML_TAG_RE.sub("", item.get("title", "")).strip()
+            raw_title = _HTML_TAG_RE.sub("", item.get("title", ""))
+            title = _html.unescape(raw_title).strip()
             if not title:
                 continue
-            snippet = _HTML_TAG_RE.sub("", item.get("description", "")).strip()
+            raw_snippet = _HTML_TAG_RE.sub("", item.get("description", ""))
+            snippet = _html.unescape(raw_snippet).strip()
             link = item.get("originallink") or item.get("link", "")
             pub_date = ""
             raw_date = item.get("pubDate", "")
@@ -1830,7 +1833,11 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
         all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
 
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
-    if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET and settings.get("naver_enabled", True):
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        logger.debug("Naver skipped: NAVER_CLIENT_ID or NAVER_CLIENT_SECRET not set")
+    elif not settings.get("naver_enabled", True):
+        logger.debug("Naver skipped: naver_enabled=false in settings")
+    else:
         all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
@@ -1852,17 +1859,18 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
             seen_titles.add(t)
             unique.append(a)
 
-    # Filter by date: keep only articles from target_date or later.
-    # Articles with no date field are kept (date unknown).
-    # If all articles are older than target_date, return empty → "개별이슈 미발견"
+    # Filter by date: keep articles from (target_date - 1 day) or later.
+    # Allowing one day back because relevant news (pre-market, after-hours)
+    # may have been published the day before and still explain that day's movement.
+    # Articles with no date field are always kept (date unknown).
     if target_date:
-        date_threshold = str(target_date)
+        date_threshold = str(target_date - timedelta(days=1))
         date_filtered = [
             a for a in unique
             if not a.get("date") or a["date"] >= date_threshold
         ]
         logger.info(
-            f"Date filter ({date_threshold}): {len(unique)} → {len(date_filtered)} articles for {ticker}"
+            f"Date filter (>={date_threshold}): {len(unique)} → {len(date_filtered)} articles for {ticker}"
         )
         unique = date_filtered
 
