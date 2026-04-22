@@ -1379,135 +1379,91 @@ YAHOO_HEADERS = {
 }
 
 
-def ticker_tz_hours(ticker):
-    """Return UTC offset (hours) for a ticker based on its exchange suffix."""
-    t = ticker.upper()
-    if t.endswith((".KS", ".KQ")) or t in ("^KS11", "^KQ11"):
-        return 9   # KST
-    if t.endswith(".T") or t == "^N225":
-        return 9   # JST
-    if t.endswith((".SS", ".SZ")) or t == "000001.SS":
-        return 8   # CST
-    if t.endswith(".HK") or t == "^HSI":
-        return 8   # HKT
-    return 0       # UTC (US, Europe 등)
-
-
 def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
-    """Fetch a single ticker's data from Yahoo Finance API.
+    """Fetch ticker data using date-indexed close prices (same as Yahoo Finance history page).
 
-    tz_hours: UTC offset of the exchange (e.g. 9 for KST/JST, 8 for CST/HKT).
-    Bar dates are evaluated in local time so 3/16 always means 3/16 locally.
-    If None, auto-detected from ticker suffix.
+    Converts each bar's UTC timestamp to the exchange's local date via
+    meta.exchangeTimezoneName (ZoneInfo), building a {local_date: close} map.
+    Change % = (close[target_date] - close[prev_trading_day]) / close[prev_trading_day].
+    tz_hours kept as parameter for backward compatibility but is no longer used.
     """
-    if tz_hours is None:
-        tz_hours = ticker_tz_hours(ticker_symbol)
+    from zoneinfo import ZoneInfo
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
 
         if target_date:
-            # Fetch a 14-day window ending at target_date+2 to account for weekends/holidays
-            period1_dt = datetime.combine(
+            period1 = int(datetime.combine(
                 target_date - timedelta(days=14), datetime.min.time()
-            ).replace(tzinfo=timezone.utc)
-            period2_dt = datetime.combine(
-                target_date + timedelta(days=2), datetime.min.time()
-            ).replace(tzinfo=timezone.utc)
-            params = {
-                "period1": int(period1_dt.timestamp()),
-                "period2": int(period2_dt.timestamp()),
-                "interval": "1d",
-            }
+            ).replace(tzinfo=timezone.utc).timestamp())
+            period2 = int(datetime.combine(
+                target_date + timedelta(days=3), datetime.min.time()
+            ).replace(tzinfo=timezone.utc).timestamp())
+            params = {"period1": period1, "period2": period2, "interval": "1d"}
         else:
             params = {"range": "5d", "interval": "1d"}
 
         resp = requests.get(url, params=params, headers=YAHOO_HEADERS, timeout=10)
-
         if resp.status_code != 200:
-            return {
-                "error": f"Yahoo API returned {resp.status_code}",
-                "change_pct": 0,
-                "name": ticker_symbol,
-            }
+            return {"error": f"Yahoo API {resp.status_code}", "change_pct": 0, "name": ticker_symbol}
 
-        data = resp.json()
-        result = data["chart"]["result"][0]
+        result = resp.json()["chart"]["result"][0]
         meta = result["meta"]
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
+        name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
-        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+        # Convert each UTC timestamp to the exchange's local date — same as history page
+        tz_name = meta.get("exchangeTimezoneName", "UTC")
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = ZoneInfo("UTC")
 
-        tz_offset = timedelta(hours=tz_hours)
-
-        # --- 진단 로그: Yahoo Finance 원본 타임스탬프 확인 ---
-        if tz_hours != 0 and valid:
-            diag = [
-                f"{datetime.utcfromtimestamp(ts).strftime('%m/%d %H:%M')}UTC"
-                f"→{(datetime.utcfromtimestamp(ts)+tz_offset).date()}"
-                for ts, _ in valid[-4:]
-            ]
-            logger.info(f"[{ticker_symbol}] tz={tz_hours}h target={target_date} "
-                        f"last4bars={diag} meta_gmtoffset={meta.get('gmtoffset')} "
-                        f"meta_tz={meta.get('exchangeTimezoneName')}")
-
-        # Deduplicate: keep the last bar per local exchange date.
-        # Yahoo Finance timestamps are UTC; add tz_offset to get local date.
-        seen: dict = {}
-        for ts, c in valid:
-            seen[(datetime.utcfromtimestamp(ts) + tz_offset).date()] = (ts, c)
-        valid = sorted(seen.values())
+        date_close: dict = {}
+        for ts, c in zip(timestamps, closes):
+            if c is None:
+                continue
+            local_date = datetime.fromtimestamp(ts, tz=local_tz).date()
+            date_close[local_date] = c  # multiple bars per day → keep last
 
         if target_date:
-            # Yahoo Finance often assigns Asian index bars (tz_hours > 0) a timestamp
-            # of the NEXT UTC midnight (e.g. 4/21 KST close → ts = 4/22 00:00 UTC).
-            # Adding tz_offset then gives 4/22, which > target_date and gets filtered out.
-            # Fix: accept UTC dates up to target_date+1 for positive-tz markets.
-            utc_ceiling = target_date + timedelta(days=1) if tz_hours > 0 else target_date
-            filtered = [(ts, c) for ts, c in valid
-                        if datetime.utcfromtimestamp(ts).date() <= utc_ceiling]
-            if len(filtered) >= 2:
-                valid = filtered
+            date_close = {d: c for d, c in date_close.items() if d <= target_date}
 
-        if len(valid) < 2:
-            return {
-                "error": f"Insufficient data (rows={len(valid)})",
-                "change_pct": 0,
-                "name": ticker_symbol,
-            }
+        sorted_dates = sorted(date_close.keys())
+        if len(sorted_dates) < 2:
+            return {"error": f"Insufficient data ({len(sorted_dates)} days)",
+                    "change_pct": 0, "name": name}
 
-        prev_close = valid[-2][1]
-        last_close = valid[-1][1]
-        change_pct = ((last_close - prev_close) / prev_close) * 100
-        # Cap last_date to target_date: if Yahoo Finance's next-day convention was used,
-        # (ts + tz_offset) gives target_date+1, but the actual trading date is target_date.
-        _raw_last_date = (datetime.utcfromtimestamp(valid[-1][0]) + tz_offset).date()
-        last_date = min(_raw_last_date, target_date) if target_date else _raw_last_date
-        name = meta.get("shortName", meta.get("longName", ticker_symbol))
+        last_date  = sorted_dates[-1]
+        prev_date  = sorted_dates[-2]
+        last_close = date_close[last_date]
+        prev_close = date_close[prev_date]
+        change_pct = (last_close - prev_close) / prev_close * 100
+
+        logger.info(f"[{ticker_symbol}] {prev_date}→{last_date} "
+                    f"close={prev_close:.2f}→{last_close:.2f} chg={change_pct:+.2f}%")
 
         return {
             "name": name,
             "change_pct": round(float(change_pct), 2),
             "date": str(last_date),
+            "price": round(float(last_close), 2),
         }
     except Exception as e:
-        return {
-            "error": str(e),
-            "change_pct": 0,
-            "name": ticker_symbol,
-        }
+        return {"error": str(e), "change_pct": 0, "name": ticker_symbol}
 
 
 def fetch_all_market_indices(target_date=None):
     """Fetch all global market indices data."""
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_hours=idx.get("tz_hours", 0))
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
         results.append({
             "ticker": idx["ticker"],
             "name": idx["name"],
             "region": idx["region"],
             "change_pct": data.get("change_pct", 0),
+            "price": data.get("price", 0),
             "date": data.get("date", ""),
             "error": data.get("error", ""),
         })
