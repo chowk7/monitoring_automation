@@ -111,9 +111,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Google CSE uses the same API key as Gemini by default
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "") or GEMINI_API_KEY
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID", "620f073b5bf414784")
-NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
-NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
-NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+NEWS_API_KEY = os.getenv("NEWS_API_KEY", "").strip()
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "").strip()
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "").strip()
 
 # Email configuration
 SMTP_HOST = "smtp.gmail.com"
@@ -705,6 +705,40 @@ def update_settings():
     save_settings(settings)
     _apply_schedule(settings)
     return jsonify(settings)
+
+
+# ─── Naver Diagnostic Route ───────────────────────────────────────────────────
+
+@app.route("/api/test-naver", methods=["GET"])
+def test_naver():
+    """Diagnostic: test Naver Search API connectivity and credentials."""
+    if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        return jsonify({"ok": False, "error": "NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경변수가 설정되지 않음"})
+    try:
+        url = "https://openapi.naver.com/v1/search/news.json"
+        params = {"query": "삼성전자", "display": 1, "sort": "date"}
+        headers = {
+            "X-Naver-Client-Id": NAVER_CLIENT_ID,
+            "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+        }
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return jsonify({
+                "ok": False,
+                "status_code": resp.status_code,
+                "error": resp.text[:500],
+            })
+        data = resp.json()
+        if "errorCode" in data:
+            return jsonify({"ok": False, "error": data})
+        items = data.get("items", [])
+        return jsonify({
+            "ok": True,
+            "total": data.get("total", 0),
+            "sample_title": _HTML_TAG_RE.sub("", items[0].get("title", "")) if items else None,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 # ─── Schedule Status Route ────────────────────────────────────────────────────
@@ -1601,20 +1635,29 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
         return []
     try:
         query = build_search_query(custom_query, company_name, ticker, company_name)
+        if not query:
+            return []
         url = "https://openapi.naver.com/v1/search/news.json"
-        params = {"query": query, "display": 5, "sort": "date"}
+        params = {"query": query, "display": 10, "start": 1, "sort": "date"}
         headers = {
             "X-Naver-Client-Id": NAVER_CLIENT_ID,
             "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
         }
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
         if resp.status_code != 200:
-            logger.warning(f"Naver Search API error {resp.status_code} for '{query}'")
+            logger.error(
+                f"Naver Search API error {resp.status_code} for '{query}': {resp.text[:300]}"
+            )
             return []
 
-        from email.utils import parsedate as _parsedate
+        data = resp.json()
+        if "errorCode" in data:
+            logger.error(f"Naver Search API returned errorCode for '{query}': {data}")
+            return []
+
+        from email.utils import parsedate as _naver_parsedate
         articles = []
-        for item in resp.json().get("items", []):
+        for item in data.get("items", []):
             title = _HTML_TAG_RE.sub("", item.get("title", "")).strip()
             if not title:
                 continue
@@ -1624,7 +1667,7 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
             raw_date = item.get("pubDate", "")
             if raw_date:
                 try:
-                    parsed = _parsedate(raw_date)
+                    parsed = _naver_parsedate(raw_date)
                     if parsed:
                         pub_date = f"{parsed[0]:04d}-{parsed[1]:02d}-{parsed[2]:02d}"
                 except Exception:
