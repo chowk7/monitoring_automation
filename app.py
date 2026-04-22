@@ -9,6 +9,8 @@ import smtplib
 from datetime import datetime, timedelta, timezone, date as date_cls
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from flask import Flask, render_template, request, jsonify, Response
 import requests
 from google import genai
@@ -856,11 +858,25 @@ def send_email_report():
     html_body = build_email_html(results, today, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
 
     try:
-        msg = MIMEMultipart("alternative")
+        attachment_html = build_attachment_html(results, today, market_data=market_data)
+
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM or SMTP_USER
         msg["To"] = ", ".join(all_recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        # 본문 (기존 양식)
+        body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(body_part)
+
+        # 첨부파일 (전체 데이터 + 소스 포함 상세 HTML)
+        attach_part = MIMEBase("text", "html", charset="utf-8")
+        attach_part.set_payload(attachment_html.encode("utf-8"))
+        encoders.encode_base64(attach_part)
+        attach_part.add_header("Content-Disposition", "attachment",
+                               filename=f"report_{today}.html")
+        msg.attach(attach_part)
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
@@ -969,6 +985,132 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
 </body>
 </html>"""
     return body
+
+
+def build_attachment_html(results, date_str, market_data=None):
+    """Build detailed HTML attachment with full data and article sources."""
+    from datetime import date as date_cls
+
+    INDEX_DISPLAY_NAMES = {
+        "^DJI":       "Dow Jones",
+        "^IXIC":      "Nasdaq",
+        "^GSPC":      "S&P 500",
+        "^KS11":      "코스피",
+        "^KQ11":      "코스닥",
+        "000001.SS":  "상해종합",
+        "^HSI":       "홍콩 항셍",
+        "^N225":      "닛케이 225",
+        "^FTSE":      "FTSE 100",
+        "^FCHI":      "CAC 40",
+        "^GDAXI":     "DAX",
+    }
+
+    try:
+        d = date_cls.fromisoformat(date_str)
+        date_label = f"{d.year}.{d.month:02d}.{d.day:02d}"
+    except Exception:
+        date_label = date_str
+
+    css = """
+        body{font-family:'맑은고딕',Malgun Gothic,Arial,sans-serif;font-size:10.5pt;
+             background:#fff;color:#111;margin:0;padding:24px;}
+        h1{font-size:13pt;border-bottom:2px solid #333;padding-bottom:6px;margin-bottom:16px;}
+        h2{font-size:11pt;margin:20px 0 6px;border-left:4px solid #0055aa;padding-left:8px;}
+        table{border-collapse:collapse;width:100%;margin-bottom:8px;}
+        th{background:#f0f0f0;font-weight:bold;padding:5px 8px;text-align:center;border:1px solid #ccc;font-size:9.5pt;}
+        td{padding:4px 8px;border:1px solid #ddd;vertical-align:top;font-size:9.5pt;}
+        .up{color:#0000FF;} .dn{color:#cc0000;}
+        .company-block{margin-bottom:18px;border:1px solid #e0e0e0;padding:10px 14px;border-radius:4px;}
+        .company-title{font-size:10.5pt;font-weight:bold;margin-bottom:4px;}
+        .analysis{margin:6px 0 8px;white-space:pre-wrap;line-height:1.5;}
+        .article-list{margin:0;padding:0 0 0 16px;}
+        .article-list li{margin:2px 0;}
+        .source-badge{font-size:8.5pt;color:#666;margin-left:4px;}
+        .no-articles{color:#999;font-size:9pt;}
+    """
+
+    def fmt_chg(v, decimals=2):
+        if v is None:
+            return '<span style="color:#999;">-</span>'
+        if v < 0:
+            return f'<span class="dn">△{abs(v):.{decimals}f}%</span>'
+        return f'<span class="up">+{v:.{decimals}f}%</span>'
+
+    # ── 시장 지수 섹션 ──
+    market_section = ""
+    if market_data:
+        indices_list = market_data.get("indices", market_data) if isinstance(market_data, dict) else market_data
+        if indices_list:
+            rows = ""
+            for m in indices_list:
+                if not isinstance(m, dict) or m.get("error"):
+                    continue
+                display = INDEX_DISPLAY_NAMES.get(m["ticker"], m.get("name", m["ticker"]))
+                price = m.get("price") or m.get("last_price")
+                price_str = f"{price:,.2f}" if price else "-"
+                rows += (
+                    f"<tr><td>{display}</td><td style='text-align:right'>{price_str}</td>"
+                    f"<td style='text-align:center'>{fmt_chg(m.get('change_pct'), 2)}</td>"
+                    f"<td style='text-align:center'>{m.get('region','')}</td>"
+                    f"<td style='text-align:center'>{m.get('date','')}</td></tr>"
+                )
+            if rows:
+                market_section = (
+                    "<h2>시장 지수</h2>"
+                    "<table><tr><th>지수</th><th>종가</th><th>등락률</th><th>지역</th><th>기준일</th></tr>"
+                    + rows + "</table>"
+                )
+        # 시장 분석 텍스트
+        market_analysis = market_data.get("analysis", "") if isinstance(market_data, dict) else ""
+        if market_analysis:
+            escaped = market_analysis.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            market_section += f'<div class="analysis">{escaped}</div>'
+
+    # ── 개별회사 섹션 ──
+    company_section = ""
+    for r in results:
+        analysis_text = r.get("analysis", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        articles = r.get("articles") or []
+        articles_html = ""
+        if articles:
+            items = ""
+            for a in articles:
+                title = (a.get("title") or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                link = a.get("link", "")
+                source = a.get("source", "")
+                date_a = a.get("date", "")
+                if link:
+                    items += f'<li><a href="{link}">{title}</a><span class="source-badge">[{source}] {date_a}</span></li>'
+                else:
+                    items += f'<li>{title}<span class="source-badge">[{source}] {date_a}</span></li>'
+            articles_html = f'<ul class="article-list">{items}</ul>'
+        else:
+            articles_html = '<p class="no-articles">검색된 기사 없음</p>'
+
+        company_section += (
+            f'<div class="company-block">'
+            f'<div class="company-title">{r["name"]} ({r["ticker"]}) &nbsp;|&nbsp; {fmt_chg(r.get("change_pct"), 1)}</div>'
+            f'<div class="analysis">{analysis_text}</div>'
+            f'<b style="font-size:9pt;">관련 기사</b>'
+            f'{articles_html}'
+            f'</div>'
+        )
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Stock Report {date_label}</title>
+<style>{css}</style>
+</head>
+<body>
+<h1>주가 변동 분석 리포트 &nbsp;({date_label})</h1>
+{market_section}
+<h2>개별회사</h2>
+{company_section}
+</body>
+</html>"""
+    return html
 
 
 @app.route("/api/market-indices", methods=["GET"])
@@ -2063,11 +2205,24 @@ def run_scheduled_analysis(target_date=None):
             return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
 
         subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {date_str}"
-        msg = MIMEMultipart("alternative")
+        attachment_html = build_attachment_html(results, date_str, market_data=market_data)
+
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = ", ".join(all_recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(body_part)
+
+        attach_part = MIMEBase("text", "html", charset="utf-8")
+        attach_part.set_payload(attachment_html.encode("utf-8"))
+        encoders.encode_base64(attach_part)
+        attach_part.add_header("Content-Disposition", "attachment",
+                               filename=f"report_{date_str}.html")
+        msg.attach(attach_part)
+
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
