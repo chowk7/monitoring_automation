@@ -188,7 +188,7 @@ DEFAULT_TICKERS = [
     {"ticker": "CSCO",       "category": "네트워크", "name": "Cisco"},
     # 바이오
     {"ticker": "068270.KS",  "category": "바이오", "name": "셀트리온"},
-    {"ticker": "BIIB",       "category": "바이오", "name": "Biogen"},
+    {"ticker": "BIIB",       "category": "바이오", "name": "BG"},
     {"ticker": "OGN",        "category": "바이오", "name": "Organon"},
     {"ticker": "MRNA",       "category": "바이오", "name": "Moderna"},
     {"ticker": "PFE",        "category": "바이오", "name": "Pfizer"},
