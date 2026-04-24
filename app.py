@@ -362,6 +362,9 @@ def load_settings():
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
         "custom_query": "",
+        "newsapi_query": "",
+        "google_cse_query": "",
+        "naver_query": "",
         "change_threshold": 5.0,
         "gmail_read_enabled": False,
         "gmail_subject_filter": "",
@@ -690,6 +693,12 @@ def update_settings():
         settings["prompt_without_articles"] = data["prompt_without_articles"]
     if "custom_query" in data:
         settings["custom_query"] = data["custom_query"]
+    if "newsapi_query" in data:
+        settings["newsapi_query"] = data["newsapi_query"]
+    if "google_cse_query" in data:
+        settings["google_cse_query"] = data["google_cse_query"]
+    if "naver_query" in data:
+        settings["naver_query"] = data["naver_query"]
     if "change_threshold" in data:
         try:
             val = float(data["change_threshold"])
@@ -1102,8 +1111,13 @@ def analyze_stream():
         "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
     }
 
-    # Custom search query (from query param, fallback to saved setting)
-    custom_query = request.args.get("custom_query", "").strip() or settings.get("custom_query", "")
+    # Per-source search queries (URL param overrides saved setting; fallback to legacy custom_query)
+    _legacy = settings.get("custom_query", "")
+    source_queries = {
+        "newsapi":     request.args.get("newsapi_query", "").strip()     or settings.get("newsapi_query",     "") or _legacy,
+        "google_cse":  request.args.get("google_cse_query", "").strip()  or settings.get("google_cse_query",  "") or _legacy,
+        "naver":       request.args.get("naver_query", "").strip()       or settings.get("naver_query",       "") or _legacy,
+    }
 
     def generate():
         log_memory("STREAM START")
@@ -1221,7 +1235,7 @@ def analyze_stream():
                         info.get("name", ticker),
                         info.get("date", ""),
                         target_date=target_date,
-                        custom_query=custom_query,
+                        source_queries=source_queries,
                         gmail_articles=_gmail_cache,
                     )
 
@@ -1858,15 +1872,18 @@ def read_gmail_by_subject(subject_filter, max_emails=3):
         return []
 
 
-def search_all_news_articles(ticker, company_name, trade_date, target_date=None, custom_query=None, gmail_articles=None):
+def search_all_news_articles(ticker, company_name, trade_date, target_date=None, source_queries=None, gmail_articles=None):
     """Search news from all available sources and merge results.
 
     Priority: Yahoo Finance (always) → NewsAPI → Google CSE → Naver (Korean news) → Gmail memos
+    source_queries: dict with per-source query templates, e.g.
+        {"newsapi": "...", "google_cse": "...", "naver": "..."}
     gmail_articles: pre-fetched memo list (cached); if None, fetches from IMAP directly.
     Returns up to 10 deduplicated articles.
     """
     all_articles = []
     settings = load_settings()
+    sq = source_queries or {}
 
     # 1. Yahoo Finance — always available (uses ticker directly, not text query)
     if settings.get("yahoo_finance_enabled", True):
@@ -1874,15 +1891,15 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
 
     # 2. NewsAPI — optional
     if NEWS_API_KEY and settings.get("newsapi_enabled", True):
-        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=sq.get("newsapi", "")))
 
     # 3. Google CSE — optional
     if GOOGLE_API_KEY and GOOGLE_CSE_ID and settings.get("google_cse_enabled", True):
-        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=sq.get("google_cse", "")))
 
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
     if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET and settings.get("naver_enabled", True):
-        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=sq.get("naver", "")))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
     if gmail_articles is not None:
@@ -1999,7 +2016,12 @@ def run_scheduled_analysis(target_date=None):
         settings = load_settings()
         model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
         change_threshold = float(settings.get("change_threshold", 5.0))
-        custom_query = settings.get("custom_query", "")
+        _legacy_q = settings.get("custom_query", "")
+        source_queries = {
+            "newsapi":    settings.get("newsapi_query",    "") or _legacy_q,
+            "google_cse": settings.get("google_cse_query", "") or _legacy_q,
+            "naver":      settings.get("naver_query",      "") or _legacy_q,
+        }
         prompt_templates = {
             "with_articles": settings.get("prompt_with_articles") or DEFAULT_PROMPT_WITH_ARTICLES,
             "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
@@ -2069,7 +2091,7 @@ def run_scheduled_analysis(target_date=None):
             try:
                 articles = search_all_news_articles(
                     ticker, info.get("name", ticker), info.get("date", ""),
-                    target_date=target_date, custom_query=custom_query,
+                    target_date=target_date, source_queries=source_queries,
                     gmail_articles=_gmail_cache,
                 )
                 result = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)

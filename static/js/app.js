@@ -50,9 +50,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const tickerListToggle = document.getElementById("tickerListToggle");
     const tickerListBody = document.getElementById("tickerListBody");
 
-    // Custom query elements
-    const customQueryInput = document.getElementById("customQueryInput");
-    const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
+    // Per-source query elements
+    const newsapiQueryInput = document.getElementById("newsapiQueryInput");
+    const googleCseQueryInput = document.getElementById("googleCseQueryInput");
+    const naverQueryInput = document.getElementById("naverQueryInput");
+    const saveSourceQueriesBtn = document.getElementById("saveSourceQueriesBtn");
 
     // Threshold elements
     const thresholdInput = document.getElementById("thresholdInput");
@@ -180,9 +182,9 @@ document.addEventListener("DOMContentLoaded", () => {
         stopBtn.addEventListener("click", stopAnalysis);
     }
 
-    // Save custom query
-    if (saveCustomQueryBtn) {
-        saveCustomQueryBtn.addEventListener("click", saveCustomQuery);
+    // Save per-source queries
+    if (saveSourceQueriesBtn) {
+        saveSourceQueriesBtn.addEventListener("click", saveSourceQueries);
     }
 
     // Save threshold
@@ -327,10 +329,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 promptWithoutArticles.value = data.prompt_without_articles || data.default_prompt_without_articles || "";
             }
 
-            // Load custom query
-            if (customQueryInput) {
-                customQueryInput.value = data.custom_query || "";
-            }
+            // Load per-source query templates
+            if (newsapiQueryInput) newsapiQueryInput.value = data.newsapi_query || "";
+            if (googleCseQueryInput) googleCseQueryInput.value = data.google_cse_query || "";
+            if (naverQueryInput) naverQueryInput.value = data.naver_query || "";
 
             // Load change threshold
             if (data.change_threshold !== undefined) {
@@ -411,16 +413,22 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    async function saveCustomQuery() {
-        const query = customQueryInput ? customQueryInput.value.trim() : "";
+    async function saveSourceQueries() {
+        const newsapiQuery = newsapiQueryInput ? newsapiQueryInput.value.trim() : "";
+        const googleCseQuery = googleCseQueryInput ? googleCseQueryInput.value.trim() : "";
+        const naverQuery = naverQueryInput ? naverQueryInput.value.trim() : "";
         try {
             const resp = await fetch("/api/settings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ custom_query: query }),
+                body: JSON.stringify({
+                    newsapi_query: newsapiQuery,
+                    google_cse_query: googleCseQuery,
+                    naver_query: naverQuery,
+                }),
             });
             if (resp.ok) {
-                showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
+                showSuccess("소스별 검색어 템플릿 저장됨");
             } else {
                 showError("저장 실패");
             }
@@ -956,11 +964,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
-        const customQuery = customQueryInput ? customQueryInput.value.trim() : "";
+        const newsapiQuery = newsapiQueryInput ? newsapiQueryInput.value.trim() : "";
+        const googleCseQuery = googleCseQueryInput ? googleCseQueryInput.value.trim() : "";
+        const naverQuery = naverQueryInput ? naverQueryInput.value.trim() : "";
 
         // Use SSE for streaming
         let url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;
-        if (customQuery) url += `&custom_query=${encodeURIComponent(customQuery)}`;
+        if (newsapiQuery) url += `&newsapi_query=${encodeURIComponent(newsapiQuery)}`;
+        if (googleCseQuery) url += `&google_cse_query=${encodeURIComponent(googleCseQuery)}`;
+        if (naverQuery) url += `&naver_query=${encodeURIComponent(naverQuery)}`;
         const eventSource = new EventSource(url);
         currentEventSource = eventSource;
 
