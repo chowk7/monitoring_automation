@@ -97,12 +97,33 @@ def gcs_upload(src_path, blob_name):
 
 
 def startup_sync_from_gcs():
-    """On app start, pull settings.json and tickers.csv from GCS (if configured)."""
+    """On app start, pull settings.json and tickers.csv from GCS (if configured).
+    If GCS tickers differ from DEFAULT_TICKERS, push DEFAULT_TICKERS to GCS.
+    """
     if not GCS_BUCKET_NAME:
         return
     logger.info(f"GCS: syncing config from bucket '{GCS_BUCKET_NAME}'...")
     gcs_download("settings.json", SETTINGS_FILE)
     gcs_download("tickers.csv", TICKERS_CSV_FILE)
+
+    # If the GCS ticker set differs from DEFAULT_TICKERS, update GCS automatically.
+    # This keeps GCS in sync whenever DEFAULT_TICKERS is changed in code.
+    if os.path.exists(TICKERS_CSV_FILE):
+        gcs_ticker_set = set()
+        try:
+            import csv as _csv
+            with open(TICKERS_CSV_FILE, "r", newline="", encoding="utf-8") as _f:
+                for row in _csv.reader(_f):
+                    if row and row[0].strip():
+                        gcs_ticker_set.add(row[0].strip().upper())
+        except Exception:
+            pass
+        default_ticker_set = {t["ticker"].upper() for t in DEFAULT_TICKERS}
+        if gcs_ticker_set != default_ticker_set:
+            save_tickers_to_csv(DEFAULT_TICKERS)
+            if gcs_upload(TICKERS_CSV_FILE, "tickers.csv"):
+                logger.info(f"GCS: tickers.csv updated ({len(DEFAULT_TICKERS)} tickers)")
+
     logger.info("GCS: startup sync complete")
 
 
@@ -236,6 +257,11 @@ DEFAULT_TICKERS = [
     {"ticker": "030000.KS",  "category": "삼성", "name": "제일기획"},
     {"ticker": "0126Z0.KS",  "category": "삼성", "name": "에피스홀딩스"},
     {"ticker": "207940.KS",  "category": "삼성", "name": "로직스"},
+    {"ticker": "000810.KS",  "category": "삼성", "name": "삼성화재"},
+    {"ticker": "029780.KS",  "category": "삼성", "name": "삼성카드"},
+    {"ticker": "008770.KS",  "category": "삼성", "name": "호텔신라"},
+    {"ticker": "016360.KS",  "category": "삼성", "name": "삼성증권"},
+    {"ticker": "028050.KS",  "category": "삼성", "name": "삼성엔지니어링"},
 ]
 
 # Global market indices
