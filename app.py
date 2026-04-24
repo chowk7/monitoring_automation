@@ -422,7 +422,7 @@ def _apply_schedule(settings):
 
     if enabled:
         _scheduler.add_job(
-            run_scheduled_analysis,
+            lambda: run_scheduled_analysis(),
             CronTrigger(hour=hour, minute=minute, timezone=kst),
             id="daily_analysis",
             name="Daily stock analysis",
@@ -493,8 +493,15 @@ def save_tickers_to_csv(ticker_list):
 
 
 # ─── GCS Startup Sync ─────────────────────────────────────────────────────────
-startup_sync_from_gcs()
-_apply_schedule(load_settings())
+try:
+    startup_sync_from_gcs()
+except Exception as _e:
+    logger.error(f"Startup GCS sync failed (non-fatal): {_e}")
+
+try:
+    _apply_schedule(load_settings())
+except Exception as _e:
+    logger.error(f"Startup scheduler init failed (non-fatal): {_e}")
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
