@@ -279,6 +279,36 @@ MARKET_INDICES = [
     {"ticker": "^GDAXI",    "name": "DAX",       "region": "독일",   "tz_hours":  1},
 ]
 
+# Email market group layout (ticker → display label, grouped by region)
+EMAIL_MARKET_GROUPS = [
+    {
+        "label": "미  국",
+        "indices": [
+            ("^DJI",      "Dow"),
+            ("^IXIC",     "Nasdaq"),
+            ("^GSPC",     "S&P 500"),
+        ],
+    },
+    {
+        "label": "아시아",
+        "indices": [
+            ("^KS11",     "韓코스피"),
+            ("^KQ11",     "코스닥"),
+            ("000001.SS", "中상해"),
+            ("^HSI",      "홍콩항셍"),
+            ("^N225",     "日니케이"),
+        ],
+    },
+    {
+        "label": "유  럽",
+        "indices": [
+            ("^FTSE",  "英FTSE"),
+            ("^FCHI",  "CAC"),
+            ("^GDAXI", "獨DAX"),
+        ],
+    },
+]
+
 # Region → ticker mapping for market news search
 MARKET_NEWS_REGIONS = {
     "미국":  {"ticker": "^DJI",      "query": "US stock market Dow Jones Nasdaq S&P 500"},
@@ -841,14 +871,18 @@ def send_email_report():
     # Build HTML email
     today = datetime.now(KST).strftime("%Y-%m-%d")
     subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {today}"
-    html_body = build_email_html(results, today, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
+    summary_html  = build_email_summary_html(results, today, market_data=market_data)
+    detailed_html = build_email_html(results, today, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
 
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM or SMTP_USER
         msg["To"] = ", ".join(all_recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(MIMEText(summary_html, "html", "utf-8"))
+        att = MIMEText(detailed_html, "html", "utf-8")
+        att.add_header("Content-Disposition", "attachment", filename=f"analysis_{today}.html")
+        msg.attach(att)
 
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
@@ -1037,6 +1071,100 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
     </body>
     </html>
     """
+
+
+def build_email_summary_html(results, date_str, market_data=None):
+    """Build concise Korean-style email body (맑은고딕 10.5pt).
+
+    Positive changes shown in blue without a sign.
+    Negative changes shown in red with △ instead of minus.
+    Email body = brief summary; detailed HTML is sent as attachment.
+    """
+    FONT = "'맑은고딕','Malgun Gothic',sans-serif"
+    SIZE = "10.5pt"
+    BLUE = "#1a56db"
+    RED  = "#c0392b"
+
+    def fmt_chg(v, decimals=2):
+        if v > 0:
+            return f'<span style="color:{BLUE};">{v:.{decimals}f}%</span>'
+        elif v < 0:
+            return f'<span style="color:{RED};">△{abs(v):.{decimals}f}%</span>'
+        return f'<span style="color:#555;">0.{"0"*decimals}%</span>'
+
+    try:
+        dt = datetime.strptime(date_str[:10], "%Y-%m-%d")
+        date_label = f"{dt.month:02d}/{dt.day:02d}"
+    except Exception:
+        date_label = date_str
+
+    # Market groups
+    market_html = ""
+    if market_data and market_data.get("indices"):
+        idx_map = {idx["ticker"]: idx for idx in market_data["indices"]}
+        group_rows = []
+        for group in EMAIL_MARKET_GROUPS:
+            parts = []
+            for ticker, label in group["indices"]:
+                idx = idx_map.get(ticker)
+                if idx:
+                    parts.append(f"{label} ({fmt_chg(idx.get('change_pct', 0))})")
+            if parts:
+                group_rows.append(
+                    f'<tr valign="top">'
+                    f'<td style="padding:2px 12px 2px 0;white-space:nowrap;">{group["label"]} :&nbsp;</td>'
+                    f'<td style="padding:2px 0;">{",&nbsp;&nbsp;".join(parts)}</td>'
+                    f'</tr>'
+                )
+        if group_rows:
+            market_html = (
+                '<p style="margin:12px 0 4px 0;"><strong>시  장</strong></p>'
+                '<table style="border:none;border-collapse:collapse;">'
+                + "".join(group_rows)
+                + "</table>"
+            )
+
+    # Individual companies
+    def first_line(text):
+        if not text:
+            return "분석 결과 없음"
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                return line
+        return text.strip()
+
+    company_rows = []
+    for r in results:
+        v = r.get("change_pct", 0)
+        name = r.get("name") or r.get("ticker", "")
+        analysis = first_line(r.get("analysis", ""))
+        company_rows.append(
+            f'<tr valign="top">'
+            f'<td style="padding:2px 12px 2px 0;white-space:nowrap;">{name} ({fmt_chg(v, decimals=1)})</td>'
+            f'<td style="padding:2px 0;">: {analysis}</td>'
+            f'</tr>'
+        )
+
+    companies_html = ""
+    if company_rows:
+        companies_html = (
+            '<p style="margin:16px 0 4px 0;"><strong>개별회사</strong></p>'
+            '<table style="border:none;border-collapse:collapse;">'
+            + "".join(company_rows)
+            + "</table>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family:{FONT};font-size:{SIZE};color:#111;margin:0;padding:20px;line-height:1.6;">
+<p style="margin:0 0 2px 0;">안녕하십니까,</p>
+<p style="margin:0 0 16px 0;">{date_label}일 종가기준 모니터링 업체 현황 송부드립니다.</p>
+{market_html}
+{companies_html}
+</body>
+</html>"""
 
 
 @app.route("/api/market-indices", methods=["GET"])
@@ -2113,18 +2241,22 @@ def run_scheduled_analysis(target_date=None):
 
         # Phase 3: 이메일 전송
         date_str = str(target_date)
-        html_body = build_email_html(results, date_str, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
+        summary_html  = build_email_summary_html(results, date_str, market_data=market_data)
+        detailed_html = build_email_html(results, date_str, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
         all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
             return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
 
         subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {date_str}"
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
         msg["To"] = ", ".join(all_recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
+        msg.attach(MIMEText(summary_html, "html", "utf-8"))
+        att = MIMEText(detailed_html, "html", "utf-8")
+        att.add_header("Content-Disposition", "attachment", filename=f"analysis_{date_str}.html")
+        msg.attach(att)
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
