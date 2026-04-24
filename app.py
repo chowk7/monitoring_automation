@@ -160,9 +160,6 @@ DEFAULT_TICKERS = [
     {"ticker": "NXPI",       "category": "반도체", "name": "NXP"},
     {"ticker": "STMPA.PA",   "category": "반도체", "name": "STMicro"},
     {"ticker": "6723.T",     "category": "반도체", "name": "Renesas"},
-    {"ticker": "ON",         "category": "반도체", "name": "온세미"},
-    {"ticker": "WOLF",       "category": "반도체", "name": "울프스피드"},
-    {"ticker": "0981.HK",    "category": "반도체", "name": "SMIC"},
     # 네트워크
     {"ticker": "CIEN",       "category": "네트워크", "name": "Ciena"},
     {"ticker": "NOKIA.HE",   "category": "네트워크", "name": "Nokia"},
@@ -184,8 +181,6 @@ DEFAULT_TICKERS = [
     {"ticker": "2359.HK",    "category": "바이오", "name": "Wuxi AppTec"},
     {"ticker": "BANB.SW",    "category": "바이오", "name": "Bachem"},
     {"ticker": "PPGN.SW",    "category": "바이오", "name": "PolyPeptide"},
-    {"ticker": "4523.T",     "category": "바이오", "name": "에이사이"},
-    {"ticker": "OXB.L",      "category": "바이오", "name": "옥스퍼드 바이오메디카"},
     # 의료기기
     {"ticker": "GEHC",       "category": "의료기기", "name": "GE 헬스케어"},
     {"ticker": "PHIA.AS",    "category": "의료기기", "name": "Philips"},
@@ -194,7 +189,6 @@ DEFAULT_TICKERS = [
     {"ticker": "GH",         "category": "의료기기", "name": "Guardant Health"},
     {"ticker": "ILMN",       "category": "의료기기", "name": "Illumina"},
     {"ticker": "GRAL",       "category": "의료기기", "name": "Grail"},
-    {"ticker": "PACB",       "category": "의료기기", "name": "퍼시픽 바이오사이언스"},
     # PC
     {"ticker": "HPQ",        "category": "PC", "name": "HP"},
     {"ticker": "HPE",        "category": "PC", "name": "HPE"},
@@ -210,15 +204,12 @@ DEFAULT_TICKERS = [
     {"ticker": "VRT",        "category": "공조", "name": "Vertiv"},
     # 가전
     {"ticker": "ELUX-B.ST",  "category": "가전", "name": "Elux"},
-    {"ticker": "WHR",        "category": "가전", "name": "월풀"},
     # 전장
     {"ticker": "APTV",       "category": "전장", "name": "Aptiv"},
     {"ticker": "TSLA",       "category": "전장", "name": "Tesla"},
     {"ticker": "MBLY",       "category": "전장", "name": "Mobileye"},
     {"ticker": "002594.SZ",  "category": "전장", "name": "BYD"},
     {"ticker": "005380.KS",  "category": "전장", "name": "Hyundai Motor"},
-    {"ticker": "AMV0.DE",    "category": "전장", "name": "아우토모티브 셀"},
-    {"ticker": "VOW.DE",     "category": "전장", "name": "폭스바겐"},
     # 게임
     {"ticker": "RBLX",       "category": "게임", "name": "Roblox"},
     {"ticker": "U",          "category": "게임", "name": "Unity"},
@@ -233,7 +224,6 @@ DEFAULT_TICKERS = [
     {"ticker": "6758.T",     "category": "기타", "name": "Sony"},
     {"ticker": "GLW",        "category": "기타", "name": "Corning"},
     {"ticker": "6324.T",     "category": "기타", "name": "Harmonic Drive"},
-    {"ticker": "373220.KS",  "category": "기타", "name": "LG에너지솔루션"},
     # 삼성
     {"ticker": "005930.KS",  "category": "삼성", "name": "전자"},
     {"ticker": "028260.KS",  "category": "삼성", "name": "물산"},
@@ -246,11 +236,6 @@ DEFAULT_TICKERS = [
     {"ticker": "030000.KS",  "category": "삼성", "name": "제일기획"},
     {"ticker": "0126Z0.KS",  "category": "삼성", "name": "에피스홀딩스"},
     {"ticker": "207940.KS",  "category": "삼성", "name": "로직스"},
-    {"ticker": "000810.KS",  "category": "삼성", "name": "삼성화재"},
-    {"ticker": "029780.KS",  "category": "삼성", "name": "삼성카드"},
-    {"ticker": "008770.KS",  "category": "삼성", "name": "호텔신라"},
-    {"ticker": "016360.KS",  "category": "삼성", "name": "삼성증권"},
-    {"ticker": "028050.KS",  "category": "삼성", "name": "삼성엔지니어링"},
 ]
 
 # Global market indices
