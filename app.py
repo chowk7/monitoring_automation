@@ -1435,6 +1435,131 @@ def analyze():
 
 # ─── Core Functions ───────────────────────────────────────────────────────────
 
+# CSE queries for market index groups and the index-name → ticker mapping
+_CSE_INDEX_QUERIES = [
+    {
+        "q": "코스피 코스닥 오늘 등락률",
+        "map": {
+            "코스피": "^KS11",
+            "코스닥": "^KQ11",
+        },
+    },
+    {
+        "q": "다우존스 나스닥 S&P500 닛케이 상해 항셍 FTSE CAC DAX 등락률 오늘",
+        "map": {
+            "다우존스": "^DJI",
+            "나스닥":   "^IXIC",
+            "S&P500":  "^GSPC",
+            "S&P 500": "^GSPC",
+            "닛케이":   "^N225",
+            "상해종합": "000001.SS",
+            "상해":     "000001.SS",
+            "항셍":     "^HSI",
+            "FTSE":    "^FTSE",
+            "CAC":     "^FCHI",
+            "DAX":     "^GDAXI",
+        },
+    },
+]
+
+
+def _parse_idx_pct(text):
+    """Parse '▲1.45', '▼0.58', '+1.45', '-0.58' → signed float or None."""
+    if not text:
+        return None
+    s = str(text).strip().replace(",", "").replace("%", "").replace(" ", "")
+    neg = "▼" in s or (s.startswith("-") and "▲" not in s)
+    s = re.sub(r"[▲▼+\-]", "", s)
+    try:
+        v = float(s)
+        return round(-v if neg else v, 2)
+    except ValueError:
+        return None
+
+
+def _extract_pct_near(text, name):
+    """From `text`, find `name` then extract the nearest ±% value within 250 chars."""
+    pos = text.find(name)
+    if pos < 0:
+        return None
+    ctx = text[pos: pos + 250]
+    # Pattern 1: explicit ▲/▼ sign then digits%
+    m = re.search(r"([▲▼])\s*([\d.]+)\s*%", ctx)
+    if m:
+        sign = 1 if m.group(1) == "▲" else -1
+        try:
+            return round(sign * float(m.group(2)), 2)
+        except ValueError:
+            pass
+    # Pattern 2: explicit +/- sign with digits%
+    m = re.search(r"([+\-])\s*(\d+\.\d+)\s*%", ctx)
+    if m:
+        sign = -1 if m.group(1) == "-" else 1
+        try:
+            return round(sign * float(m.group(2)), 2)
+        except ValueError:
+            pass
+    # Pattern 3: bare digits% with ▲▼ somewhere before in context (up to 80 chars)
+    m = re.search(r"(\d+\.\d+)\s*%", ctx)
+    if m:
+        prefix = ctx[: m.start()]
+        if "▲" in prefix:
+            return round(float(m.group(1)), 2)
+        if "▼" in prefix:
+            return round(-float(m.group(1)), 2)
+    return None
+
+
+def _fetch_indices_via_cse():
+    """Fetch market index change % using Google CSE snippet parsing.
+
+    Makes one CSE call per query group and extracts % changes from the
+    combined title + snippet text of returned results.
+    Returns {ticker: change_pct} for successfully parsed indices.
+    Falls back silently — caller handles missing entries via Yahoo Finance.
+    """
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        return {}
+
+    results = {}
+    cse_url = "https://www.googleapis.com/customsearch/v1"
+
+    for cfg in _CSE_INDEX_QUERIES:
+        try:
+            params = {
+                "key": GOOGLE_API_KEY,
+                "cx":  GOOGLE_CSE_ID,
+                "q":   cfg["q"],
+                "num": 10,
+                "dateRestrict": "d1",  # last 1 day
+            }
+            resp = requests.get(cse_url, params=params, timeout=10)
+            if resp.status_code != 200:
+                logger.warning(f"CSE index query '{cfg['q']}' → HTTP {resp.status_code}")
+                continue
+
+            data = resp.json()
+            # Aggregate all title + snippet text
+            full_text = " ".join(
+                item.get("title", "") + " " + item.get("snippet", "")
+                for item in data.get("items", [])
+            )
+            logger.debug(f"CSE index text ({cfg['q'][:30]}…): {full_text[:400]}")
+
+            for name, ticker in cfg["map"].items():
+                if ticker in results:
+                    continue
+                pct = _extract_pct_near(full_text, name)
+                if pct is not None:
+                    results[ticker] = pct
+                    logger.info(f"CSE index {name} ({ticker}): {pct:+.2f}%")
+
+        except Exception as e:
+            logger.warning(f"CSE index fetch error: {e}")
+
+    return results
+
+
 YAHOO_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
@@ -1539,18 +1664,34 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
 
 def fetch_all_market_indices(target_date=None):
-    """Fetch all global market indices data."""
+    """Fetch all global market indices, preferring Google CSE with Yahoo Finance fallback."""
+    cse_data = _fetch_indices_via_cse()
+    today_str = str(datetime.now(KST).date())
+
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_hours=idx.get("tz_hours", 0))
-        results.append({
-            "ticker": idx["ticker"],
-            "name": idx["name"],
-            "region": idx["region"],
-            "change_pct": data.get("change_pct", 0),
-            "date": data.get("date", ""),
-            "error": data.get("error", ""),
-        })
+        ticker = idx["ticker"]
+        if ticker in cse_data:
+            results.append({
+                "ticker": ticker,
+                "name":   idx["name"],
+                "region": idx["region"],
+                "change_pct": cse_data[ticker],
+                "date":  today_str,
+                "error": "",
+            })
+        else:
+            # Yahoo Finance fallback for any index CSE could not resolve
+            logger.info(f"Yahoo fallback for index {ticker}")
+            data = fetch_single_ticker(ticker, target_date=target_date, tz_hours=idx.get("tz_hours", 0))
+            results.append({
+                "ticker": ticker,
+                "name":   idx["name"],
+                "region": idx["region"],
+                "change_pct": data.get("change_pct", 0),
+                "date":  data.get("date", today_str),
+                "error": data.get("error", ""),
+            })
     return results
 
 
