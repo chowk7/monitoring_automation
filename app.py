@@ -2179,7 +2179,7 @@ def run_scheduled_analysis(target_date=None):
         for t in ticker_objects:
             result = fetch_single_ticker(t["ticker"], target_date=target_date)
             all_stocks[t["ticker"]] = {
-                "name": result.get("name") or t.get("name") or t["ticker"],
+                "name": t.get("name") or result.get("name") or t["ticker"],
                 "change_pct": result.get("change_pct", 0),
                 "category": t.get("category", ""),
             }
