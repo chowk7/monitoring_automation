@@ -1291,7 +1291,7 @@ def analyze_stream():
                 result = fetch_single_ticker(ticker, target_date=target_date)
                 meta = ticker_meta.get(ticker, {})
                 all_stocks_slim[ticker] = {
-                    "name": result.get("name") or meta.get("name") or ticker,
+                    "name": meta.get("name") or result.get("name") or ticker,
                     "change_pct": result.get("change_pct", 0),
                     "category": meta.get("category", ""),
                 }
@@ -1358,9 +1358,10 @@ def analyze_stream():
                 try:
                     # Step 1: Search news from all available sources
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
+                    _display_name = ticker_meta.get(ticker, {}).get("name") or info.get("name", ticker)
                     articles = search_all_news_articles(
                         ticker,
-                        info.get("name", ticker),
+                        _display_name,
                         info.get("date", ""),
                         target_date=target_date,
                         source_queries=source_queries,
@@ -1378,7 +1379,7 @@ def analyze_stream():
                     used_articles = result["used_articles"]
                     batch_results.append({
                         "ticker": ticker,
-                        "name": info.get("name", ticker),
+                        "name": _display_name,
                         "change_pct": info["change_pct"],
                         "analysis": result["analysis"],
                         "articles_found": len(articles) > 0,
@@ -1401,7 +1402,7 @@ def analyze_stream():
                     logger.error(f"Error processing {ticker}: {e}")
                     batch_results.append({
                         "ticker": ticker,
-                        "name": info.get("name", ticker),
+                        "name": ticker_meta.get(ticker, {}).get("name") or info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": f"분석 실패: {str(e)}",
                         "articles_found": False,
@@ -2187,7 +2188,8 @@ def run_scheduled_analysis(target_date=None):
                 all_stocks[t["ticker"]]["error"] = result["error"]
             if abs(result.get("change_pct", 0)) >= change_threshold:
                 filtered_list.append((t["ticker"], result))
-        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+        ticker_order = {t["ticker"]: i for i, t in enumerate(ticker_objects)}
+        filtered_list.sort(key=lambda x: ticker_order.get(x[0], 9999))
         # 카테고리별 평균 등락률 계산
         category_stats = {}
         for tkr, info in all_stocks.items():
@@ -2217,16 +2219,17 @@ def run_scheduled_analysis(target_date=None):
         results = []
         for ticker, info in filtered_list:
             try:
+                meta = ticker_meta.get(ticker, {})
+                _display_name = meta.get("name") or info.get("name", ticker)
                 articles = search_all_news_articles(
-                    ticker, info.get("name", ticker), info.get("date", ""),
+                    ticker, _display_name, info.get("date", ""),
                     target_date=target_date, source_queries=source_queries,
                     gmail_articles=_gmail_cache,
                 )
                 result = analyze_with_gemini(ticker, info, articles=articles, model=model, prompt_templates=prompt_templates)
-                meta = ticker_meta.get(ticker, {})
                 results.append({
                     "ticker": ticker,
-                    "name": info.get("name", ticker) or meta.get("name", ticker),
+                    "name": _display_name,
                     "change_pct": info["change_pct"],
                     "analysis": result["analysis"],
                     "articles_found": len(articles) > 0,
