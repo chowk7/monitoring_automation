@@ -2157,7 +2157,7 @@ def run_scheduled_analysis(target_date=None):
 
         # Phase 0: 글로벌 지수
         logger.info("Fetching market indices...")
-        indices_data = fetch_all_market_indices(target_date)
+        indices_data = fetch_all_market_indices(target_date=None)  # always use Yahoo's latest available data
         trade_date_str = next((i["date"] for i in indices_data if i.get("date")), str(target_date))
         # News date uses KST (target_date) — earliest timezone, so articles are most likely available
         news_date_kst = str(target_date)
