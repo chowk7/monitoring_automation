@@ -1504,31 +1504,58 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        # Deduplicate: keep the last bar per UTC date
-        # (Yahoo Finance sometimes returns 2 bars for the same day, e.g. open + close snapshot)
+        # Deduplicate: keep the last bar per local date (exchange timezone)
         seen: dict = {}
         for ts, c in valid:
-            seen[datetime.utcfromtimestamp(ts).date()] = (ts, c)
+            local_date = (datetime.utcfromtimestamp(ts) + timedelta(hours=tz_hours)).date()
+            seen[local_date] = (ts, c)
         valid = sorted(seen.values())
 
         if target_date:
             filtered = [(ts, c) for ts, c in valid
-                        if datetime.utcfromtimestamp(ts).date() <= target_date]
+                        if (datetime.utcfromtimestamp(ts) + timedelta(hours=tz_hours)).date() <= target_date]
             if len(filtered) >= 2:
                 valid = filtered
 
-        if len(valid) < 2:
+        if len(valid) < 1:
             return {
                 "error": f"Insufficient data (rows={len(valid)})",
                 "change_pct": 0,
                 "name": ticker_symbol,
             }
 
-        prev_close = valid[-2][1]
-        last_close = valid[-1][1]
-        change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.utcfromtimestamp(valid[-1][0]).date()
+        # Use meta.regularMarketPrice as today's price when available and more recent than last bar.
+        # Yahoo Finance often delays adding the current day's bar for non-US exchanges,
+        # but regularMarketPrice / regularMarketTime in meta always reflects the latest session.
+        rt_price = meta.get("regularMarketPrice")
+        rt_time  = meta.get("regularMarketTime")
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
+
+        if rt_price and rt_time and not target_date:
+            rt_local_date = (datetime.utcfromtimestamp(rt_time) + timedelta(hours=tz_hours)).date()
+            last_bar_local = (datetime.utcfromtimestamp(valid[-1][0]) + timedelta(hours=tz_hours)).date()
+            if rt_local_date > last_bar_local:
+                # Today's bar not yet in series — use meta price as current, last bar as prev close
+                if len(valid) < 1:
+                    return {"error": "Insufficient bar data", "change_pct": 0, "name": ticker_symbol}
+                prev_close = valid[-1][1]
+                last_close = rt_price
+                last_date  = rt_local_date
+            else:
+                # Today's bar already in series (typical for US market)
+                if len(valid) < 2:
+                    return {"error": "Insufficient data (rows=1)", "change_pct": 0, "name": ticker_symbol}
+                prev_close = valid[-2][1]
+                last_close = valid[-1][1]
+                last_date  = (datetime.utcfromtimestamp(valid[-1][0]) + timedelta(hours=tz_hours)).date()
+        else:
+            if len(valid) < 2:
+                return {"error": f"Insufficient data (rows={len(valid)})", "change_pct": 0, "name": ticker_symbol}
+            prev_close = valid[-2][1]
+            last_close = valid[-1][1]
+            last_date  = (datetime.utcfromtimestamp(valid[-1][0]) + timedelta(hours=tz_hours)).date()
+
+        change_pct = ((last_close - prev_close) / prev_close) * 100
 
         return {
             "name": name,
