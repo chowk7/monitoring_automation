@@ -417,12 +417,16 @@ def load_settings():
 
 
 def save_settings(settings):
-    """Save settings to JSON file."""
+    """Save settings to JSON file and sync to GCS if configured."""
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Error writing settings: {e}")
+        return
+    # Auto-upload to GCS so webhook instances always get the latest settings
+    if GCS_BUCKET_NAME and HAS_GCS:
+        gcs_upload(SETTINGS_FILE, "settings.json")
 
 
 # ─── Scheduler Management ─────────────────────────────────────────────────────
@@ -2381,6 +2385,17 @@ def run_scheduled_analysis(target_date=None):
                 })
             except Exception as e:
                 logger.error(f"Scheduled analysis error for {ticker}: {e}")
+                results.append({
+                    "ticker": ticker,
+                    "name": ticker_meta.get(ticker, {}).get("name") or info.get("name", ticker),
+                    "change_pct": info["change_pct"],
+                    "analysis": f"분석 실패: {str(e)}",
+                    "articles_found": False,
+                    "articles_count": 0,
+                    "articles_sources": [],
+                    "articles": [],
+                    "model_used": model,
+                })
             gc.collect()
 
         # Phase 3: 이메일 전송
