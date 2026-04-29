@@ -1330,6 +1330,8 @@ def analyze_stream():
                 max_emails=int(_gs.get("gmail_max_emails", 3)),
             )
 
+        all_results = []  # accumulate for email preview
+
         for batch_idx in range(0, len(filtered_list), ANALYSIS_BATCH_SIZE):
             batch = filtered_list[batch_idx:batch_idx + ANALYSIS_BATCH_SIZE]
             batch_num = batch_idx // ANALYSIS_BATCH_SIZE + 1
@@ -1402,8 +1404,19 @@ def analyze_stream():
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
 
+            all_results.extend(batch_results)
             del batch_results
             gc.collect()
+
+        # Build and send email preview (same format as webhook email body)
+        if all_results:
+            _market_data_for_email = {
+                "indices": indices_data,
+                "analysis": market_analysis,
+                "date": trade_date_for_market,
+            }
+            _email_html = build_email_summary_html(all_results, str(target_date), market_data=_market_data_for_email)
+            yield f"data: {json.dumps({'type': 'email_preview', 'html': _email_html})}\n\n"
 
         log_memory("STREAM DONE")
         yield f"data: {json.dumps({'type': 'done'})}\n\n"

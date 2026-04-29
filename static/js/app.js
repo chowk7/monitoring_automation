@@ -961,6 +961,8 @@ document.addEventListener("DOMContentLoaded", () => {
         currentMarketData = null;
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
+        const _epSec = document.getElementById("emailPreviewSection");
+        if (_epSec) { _epSec.style.display = "none"; document.getElementById("emailPreviewFrame").srcdoc = ""; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -1021,6 +1023,20 @@ document.addEventListener("DOMContentLoaded", () => {
                         currentResults = currentResults.concat(data.results);
                         appendAnalysisResults(data.results);
                         break;
+
+                    case "email_preview": {
+                        const sec = document.getElementById("emailPreviewSection");
+                        const frame = document.getElementById("emailPreviewFrame");
+                        if (sec && frame && data.html) {
+                            frame.srcdoc = data.html;
+                            sec.style.display = "block";
+                            frame.onload = function() {
+                                const h = this.contentWindow.document.body.scrollHeight;
+                                this.style.height = (h + 24) + "px";
+                            };
+                        }
+                        break;
+                    }
 
                     case "done":
                         eventSource.close();
@@ -1265,6 +1281,15 @@ document.addEventListener("DOMContentLoaded", () => {
         div.textContent = str;
         return div.innerHTML;
     }
+
+    window.toggleEmailPreview = function() {
+        const body = document.getElementById("emailPreviewBody");
+        const icon = document.getElementById("emailPreviewIcon");
+        if (!body) return;
+        const hidden = body.style.display === "none";
+        body.style.display = hidden ? "block" : "none";
+        if (icon) icon.textContent = hidden ? "▼ 접기" : "▶ 펼치기";
+    };
 
     // ─── GCS 동기화 ───────────────────────────────────────────────────
 

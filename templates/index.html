@@ -301,6 +301,18 @@
 
             <!-- Filtered analysis results -->
             <div id="analysisResults"></div>
+
+            <!-- Email preview (same format as webhook email body) -->
+            <div id="emailPreviewSection" style="display:none; margin-top:24px; border-top:1px solid #e5e7eb; padding-top:16px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;" onclick="toggleEmailPreview()">
+                    <h3 style="margin:0; font-size:14px; color:#374151;">✉ 이메일 본문 미리보기</h3>
+                    <span id="emailPreviewIcon" style="font-size:12px; color:#6b7280;">▼ 접기</span>
+                </div>
+                <div id="emailPreviewBody" style="margin-top:12px;">
+                    <iframe id="emailPreviewFrame" srcdoc="" frameborder="0"
+                        style="width:100%; min-height:200px; border:1px solid #e5e7eb; border-radius:6px; background:#fff;"></iframe>
+                </div>
+            </div>
         </section>
 
         <!-- Error Section -->
