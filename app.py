@@ -325,6 +325,7 @@ DEFAULT_PROMPT_WITHOUT_ARTICLES = "개별이슈 미발견."
 
 # Memory optimization: reuse Gemini client
 _gemini_client = None
+_gemini_client_key = None
 
 # Scheduler singleton
 _scheduler = None
@@ -345,9 +346,14 @@ def log_memory(label=""):
 
 
 def get_gemini_client():
-    global _gemini_client
-    if _gemini_client is None and GEMINI_API_KEY:
-        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    global _gemini_client, _gemini_client_key
+    settings = load_settings()
+    key = settings.get("gemini_api_key", "").strip() or GEMINI_API_KEY
+    if not key:
+        return None
+    if _gemini_client is None or _gemini_client_key != key:
+        _gemini_client = genai.Client(api_key=key)
+        _gemini_client_key = key
     return _gemini_client
 
 
@@ -369,6 +375,7 @@ def load_settings():
     """Load settings from JSON file."""
     defaults = {
         "gemini_model": DEFAULT_GEMINI_MODEL,
+        "gemini_api_key": "",
         "email_recipients": [],
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
@@ -682,6 +689,11 @@ def upload_tickers_csv():
 def get_settings():
     settings = load_settings()
     settings["available_models"] = AVAILABLE_GEMINI_MODELS
+    # Return masked key for display; full key sent only when explicitly set
+    _raw_key = settings.get("gemini_api_key", "")
+    settings["gemini_api_key_masked"] = (_raw_key[:6] + "..." + _raw_key[-4:]) if len(_raw_key) > 10 else ("설정됨" if _raw_key else "")
+    settings["gemini_api_key_set"] = bool(_raw_key)
+    settings.pop("gemini_api_key", None)  # don't expose raw key via GET
     settings["has_google_search"] = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
     settings["has_email"] = bool(SMTP_USER and SMTP_PASSWORD)
     settings["news_sources"] = {
@@ -700,6 +712,12 @@ def get_settings():
 def update_settings():
     data = request.get_json()
     settings = load_settings()
+    if "gemini_api_key" in data:
+        key = str(data["gemini_api_key"]).strip()
+        settings["gemini_api_key"] = key
+        global _gemini_client, _gemini_client_key
+        _gemini_client = None
+        _gemini_client_key = None
     if "gemini_model" in data:
         settings["gemini_model"] = data["gemini_model"]
     if "prompt_with_articles" in data:
@@ -1583,11 +1601,9 @@ def search_market_news_for_region(region, trade_date, target_date=None):
 
 def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=None):
     """Analyze global market index movements using Gemini and collected news."""
-    if not GEMINI_API_KEY:
-        return "Gemini API key not configured."
     client = get_gemini_client()
     if not client:
-        return "Gemini client initialization failed."
+        return "Gemini API key not configured."
     if model is None:
         settings = load_settings()
         model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
@@ -2083,9 +2099,6 @@ def analyze_with_gemini(ticker, stock_info, articles=None, model=None, prompt_te
     Template variables: {name}, {ticker}, {change_pct}, {trade_date}
     Additional for with_articles: {articles_text}, {sources_label}, {articles_count}
     """
-    if not GEMINI_API_KEY:
-        return {"analysis": "Gemini API key not configured.", "used_articles": []}
-
     client = get_gemini_client()
     if not client:
         return {"analysis": "Gemini client initialization failed.", "used_articles": []}

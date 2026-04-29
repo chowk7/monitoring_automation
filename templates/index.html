@@ -88,6 +88,21 @@
                     <button id="saveModelBtn" class="btn btn-save-model">저장</button>
                 </div>
 
+                <!-- Gemini API Key -->
+                <div class="settings-row">
+                    <label for="geminiApiKeyInput">Gemini API 키</label>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <input type="password" id="geminiApiKeyInput" class="model-select"
+                               placeholder="API 키 입력" autocomplete="off" spellcheck="false"
+                               style="width:300px;font-family:monospace;font-size:12px;">
+                        <button type="button" id="toggleApiKeyBtn" class="btn btn-save-model"
+                                onclick="toggleGeminiApiKeyVisibility()">보이기</button>
+                        <button id="saveApiKeyBtn" class="btn btn-save-model">저장</button>
+                        <span id="apiKeyStatus" style="font-size:12px;color:#6b7280;"></span>
+                    </div>
+                    <small class="settings-hint">비워두면 기본 키 사용 · 변경 후 저장하면 즉시 적용됨</small>
+                </div>
+
                 <!-- News Search Sources -->
                 <div class="settings-row">
                     <label>뉴스 기사 검색 소스</label>

@@ -17,6 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Settings elements
     const modelSelect = document.getElementById("modelSelect");
     const saveModelBtn = document.getElementById("saveModelBtn");
+    const saveApiKeyBtn = document.getElementById("saveApiKeyBtn");
     const settingsToggle = document.getElementById("settingsToggle");
     const settingsBody = document.getElementById("settingsBody");
 
@@ -124,6 +125,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Save model
     saveModelBtn.addEventListener("click", saveModel);
+
+    // Save Gemini API key
+    if (saveApiKeyBtn) saveApiKeyBtn.addEventListener("click", saveGeminiApiKey);
 
     // Prompt toggle
     if (promptToggle) {
@@ -340,6 +344,19 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (thresholdInput) thresholdInput.value = currentThreshold;
             }
 
+            // Load Gemini API key status
+            const apiKeyStatusEl = document.getElementById("apiKeyStatus");
+            const apiKeyInput = document.getElementById("geminiApiKeyInput");
+            if (apiKeyStatusEl) {
+                if (data.gemini_api_key_set) {
+                    apiKeyStatusEl.textContent = `현재: ${data.gemini_api_key_masked || "설정됨"}`;
+                    apiKeyStatusEl.style.color = "#16a34a";
+                } else {
+                    apiKeyStatusEl.textContent = "기본 키 사용 중";
+                    apiKeyStatusEl.style.color = "#6b7280";
+                }
+            }
+
             // Load auto-schedule settings
             const autoScheduleEnabledEl = document.getElementById("autoScheduleEnabled");
             const autoScheduleTimeEl = document.getElementById("autoScheduleTime");
@@ -366,6 +383,35 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             showError("모델 저장 실패");
+        }
+    }
+
+    async function saveGeminiApiKey() {
+        const input = document.getElementById("geminiApiKeyInput");
+        const key = (input ? input.value : "").trim();
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ gemini_api_key: key }),
+            });
+            if (resp.ok) {
+                input.value = "";
+                const statusEl = document.getElementById("apiKeyStatus");
+                if (statusEl) {
+                    if (key) {
+                        const masked = key.length > 10 ? key.slice(0, 6) + "..." + key.slice(-4) : "설정됨";
+                        statusEl.textContent = `현재: ${masked}`;
+                        statusEl.style.color = "#16a34a";
+                    } else {
+                        statusEl.textContent = "기본 키 사용 중";
+                        statusEl.style.color = "#6b7280";
+                    }
+                }
+                showSuccess(key ? "API 키 저장됨" : "API 키 초기화됨 (기본 키 사용)");
+            }
+        } catch (err) {
+            showError("API 키 저장 실패");
         }
     }
 
@@ -1281,6 +1327,15 @@ document.addEventListener("DOMContentLoaded", () => {
         div.textContent = str;
         return div.innerHTML;
     }
+
+    window.toggleGeminiApiKeyVisibility = function() {
+        const input = document.getElementById("geminiApiKeyInput");
+        const btn = document.getElementById("toggleApiKeyBtn");
+        if (!input) return;
+        const isHidden = input.type === "password";
+        input.type = isHidden ? "text" : "password";
+        if (btn) btn.textContent = isHidden ? "숨기기" : "보이기";
+    };
 
     window.toggleEmailPreview = function() {
         const body = document.getElementById("emailPreviewBody");
