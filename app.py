@@ -1103,7 +1103,7 @@ def build_email_summary_html(results, date_str, market_data=None):
                 )
         if group_rows:
             market_html = (
-                '<p style="margin:12px 0 4px 0;"><strong>시  장</strong></p>'
+                '<p style="margin:12px 0 4px 0;"><strong><u>시  장</u></strong></p>'
                 '<table style="border:none;border-collapse:collapse;">'
                 + "".join(group_rows)
                 + "</table>"
@@ -1134,7 +1134,7 @@ def build_email_summary_html(results, date_str, market_data=None):
     companies_html = ""
     if company_rows:
         companies_html = (
-            '<p style="margin:16px 0 4px 0;"><strong>개별회사</strong></p>'
+            '<p style="margin:16px 0 4px 0;"><strong><u>개별회사</u></strong></p>'
             '<table style="border:none;border-collapse:collapse;">'
             + "".join(company_rows)
             + "</table>"
@@ -2255,10 +2255,9 @@ def run_scheduled_analysis(target_date=None):
                 })
             gc.collect()
 
-        # Phase 3: 이메일 전송
+        # Phase 3: 이메일 전송 (웹 이메일 미리보기와 동일한 요약 양식)
         date_str = str(target_date)
-        summary_html  = build_email_summary_html(results, date_str, market_data=market_data)
-        detailed_html = build_email_html(results, date_str, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
+        summary_html = build_email_summary_html(results, date_str, market_data=market_data)
         all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
@@ -2270,9 +2269,6 @@ def run_scheduled_analysis(target_date=None):
         msg["From"] = EMAIL_FROM
         msg["To"] = ", ".join(all_recipients)
         msg.attach(MIMEText(summary_html, "html", "utf-8"))
-        att = MIMEText(detailed_html, "html", "utf-8")
-        att.add_header("Content-Disposition", "attachment", filename=f"analysis_{date_str}.html")
-        msg.attach(att)
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.ehlo()
             server.starttls()
