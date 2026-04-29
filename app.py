@@ -1235,29 +1235,12 @@ def analyze_stream():
     def generate():
         log_memory("STREAM START")
 
-        # Phase 0: Fetch global market indices + news + Gemini analysis
+        # Phase 0: Fetch global market indices (news/Gemini analysis skipped)
         yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
         indices_data = fetch_all_market_indices(target_date)
         trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
-        # News date uses KST (user-selected date) — the earliest timezone, so
-        # articles for all regions are most likely to be available.
-        news_date_kst = str(target_date)
-
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
-        articles_by_region = {}
-        for region in MARKET_NEWS_REGIONS:
-            arts = search_market_news_for_region(region, news_date_kst, target_date)
-            if arts:
-                articles_by_region[region] = arts
-
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 Gemini 분석 중...'})}\n\n"
-        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
-
-        articles_by_region_slim = {
-            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
-            for region, arts in articles_by_region.items()
-        }
-        yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
+        market_analysis = ""
+        yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': {}})}\n\n"
         gc.collect()
 
         # Phase 1: Fetch all stock data in batches
@@ -2183,19 +2166,11 @@ def run_scheduled_analysis(target_date=None):
             "without_articles": settings.get("prompt_without_articles") or DEFAULT_PROMPT_WITHOUT_ARTICLES,
         }
 
-        # Phase 0: 글로벌 지수
+        # Phase 0: 글로벌 지수 (뉴스/Gemini 분석 생략)
         logger.info("Fetching market indices...")
         indices_data = fetch_all_market_indices(target_date=None)  # always use Yahoo's latest available data
         trade_date_str = next((i["date"] for i in indices_data if i.get("date")), str(target_date))
-        # News date uses KST (target_date) — earliest timezone, so articles are most likely available
-        news_date_kst = str(target_date)
-        articles_by_region = {}
-        for region in MARKET_NEWS_REGIONS:
-            arts = search_market_news_for_region(region, news_date_kst, target_date)
-            if arts:
-                articles_by_region[region] = arts
-        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
-        market_data = {"indices": indices_data, "analysis": market_analysis, "date": trade_date_str}
+        market_data = {"indices": indices_data, "analysis": "", "date": trade_date_str}
         gc.collect()
 
         # Phase 1: 종목 데이터 수집 + 필터링
