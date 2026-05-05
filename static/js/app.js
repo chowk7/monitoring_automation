@@ -810,6 +810,51 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    async function updateEmailCopyPreview() {
+        if (currentResults.length === 0) return;
+        try {
+            const targetDate = document.getElementById("dateInput")?.value || new Date().toISOString().split("T")[0];
+            const resp = await fetch("/api/email-preview", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ results: currentResults, market_data: currentMarketData, date: targetDate }),
+            });
+            const data = await resp.json();
+            if (resp.ok && data.text) {
+                const section = document.getElementById("emailCopySection");
+                const preview = document.getElementById("emailCopyPreview");
+                if (section && preview) {
+                    preview.textContent = data.text;
+                    section.style.display = "block";
+                }
+            }
+        } catch (err) {
+            console.error("Email preview error:", err);
+        }
+    }
+
+    // Copy email text to clipboard
+    document.addEventListener("click", async (e) => {
+        if (e.target && e.target.id === "copyEmailBtn") {
+            const preview = document.getElementById("emailCopyPreview");
+            if (preview && preview.textContent) {
+                try {
+                    await navigator.clipboard.writeText(preview.textContent);
+                    const btn = document.getElementById("copyEmailBtn");
+                    const originalText = btn.textContent;
+                    btn.textContent = "복사 완료!";
+                    btn.style.background = "#10b981";
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = "";
+                    }, 2000);
+                } catch (err) {
+                    showError("복사에 실패했습니다.");
+                }
+            }
+        }
+    });
+
     // ─── Ticker Functions ─────────────────────────────────────────────────
 
     async function loadTickers() {
@@ -1087,6 +1132,9 @@ document.addEventListener("DOMContentLoaded", () => {
                                 sendEmailBtn.style.display = "inline-flex";
                                 sendEmailReport();
                             }
+
+                            // Update email copy preview
+                            updateEmailCopyPreview();
 
                             if (currentResults.length === 0 && data.message) {
                                 analysisResults.innerHTML = `
