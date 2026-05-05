@@ -493,8 +493,8 @@ def save_tickers_to_csv(ticker_list):
 
 
 # ─── GCS Startup Sync ─────────────────────────────────────────────────────────
+# Note: _apply_schedule is called after run_scheduled_analysis is defined (at end of file)
 startup_sync_from_gcs()
-_apply_schedule(load_settings())
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
@@ -2202,6 +2202,10 @@ def webhook_run_analysis():
     result = run_scheduled_analysis(target_date=target_date)
     return jsonify(result)
 
+
+# ─── Scheduler Startup ────────────────────────────────────────────────────────
+# Start scheduler after all functions are defined
+_apply_schedule(load_settings())
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 
