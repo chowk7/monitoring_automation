@@ -51,8 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const tickerListBody = document.getElementById("tickerListBody");
 
     // Custom query elements
-    const customQueryInput = document.getElementById("customQueryInput");
-    const saveCustomQueryBtn = document.getElementById("saveCustomQueryBtn");
+
 
     // Threshold elements
     const thresholdInput = document.getElementById("thresholdInput");
@@ -178,11 +177,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Stop analysis
     if (stopBtn) {
         stopBtn.addEventListener("click", stopAnalysis);
-    }
-
-    // Save custom query
-    if (saveCustomQueryBtn) {
-        saveCustomQueryBtn.addEventListener("click", saveCustomQuery);
     }
 
     // Source query templates toggle
@@ -376,11 +370,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 promptWithoutArticles.value = data.prompt_without_articles || data.default_prompt_without_articles || "";
             }
 
-            // Load custom query
-            if (customQueryInput) {
-                customQueryInput.value = data.custom_query || "";
-            }
-
             // Load source-specific query templates
             const queryInputs = {
                 "queryYahoo": data.query_yahoo,
@@ -479,21 +468,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function saveCustomQuery() {
-        const query = customQueryInput ? customQueryInput.value.trim() : "";
-        try {
-            const resp = await fetch("/api/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ custom_query: query }),
-            });
-            if (resp.ok) {
-                showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
-            } else {
-                showError("저장 실패");
-            }
-        } catch (err) {
-            showError("저장 오류");
-        }
+        // deprecated - custom query is now per-source
     }
 
     async function saveSourceQuery(key, value, btn) {
@@ -1041,7 +1016,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
-        const customQuery = customQueryInput ? customQueryInput.value.trim() : "";
+        const customQuery = "";
 
         // Use SSE for streaming
         let url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;

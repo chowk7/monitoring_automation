@@ -154,16 +154,6 @@
                     <small class="settings-hint">매일 지정 시각(KST)에 자동으로 분석 후 이메일 발송 · 앱 재시작 후에도 설정 유지</small>
                 </div>
 
-                <!-- Custom Search Query -->
-                <div class="settings-row">
-                    <label for="customQueryInput">검색어 템플릿</label>
-                    <input type="text" id="customQueryInput" class="model-select"
-                           placeholder="예: {종목명} stock price (비워두면 기본 검색어 사용)"
-                           autocomplete="off" spellcheck="false">
-                    <button id="saveCustomQueryBtn" class="btn btn-save-model">저장</button>
-                    <small class="settings-hint" style="display:block;margin-top:4px;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code> · NewsAPI, Google CSE 검색어에 적용</small>
-                </div>
-
                 <!-- News Source-Specific Query Templates -->
                 <div class="settings-row" style="flex-direction:column;align-items:stretch;">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
