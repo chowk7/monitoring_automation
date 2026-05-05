@@ -362,6 +362,18 @@ def load_settings():
         "prompt_with_articles": DEFAULT_PROMPT_WITH_ARTICLES,
         "prompt_without_articles": DEFAULT_PROMPT_WITHOUT_ARTICLES,
         "custom_query": "",
+        # News source-specific search queries
+        "query_yahoo": "{name} {ticker} stock",
+        "query_newsapi": "{name} stock OR {ticker}",
+        "query_google": "{name} stock {ticker}",
+        "query_naver": "{name} 주가",
+        # Global market indices queries
+        "query_market_us": "US stock market Dow Jones Nasdaq",
+        "query_market_korea": "코스피 코스닥 주식시장",
+        "query_market_china": "China Shanghai stock market",
+        "query_market_hongkong": "Hong Kong Hang Seng stock market",
+        "query_market_japan": "Japan Nikkei stock market",
+        "query_market_europe": "European stock market FTSE DAX",
         "change_threshold": 5.0,
         "gmail_read_enabled": False,
         "gmail_subject_filter": "",
@@ -683,6 +695,14 @@ def update_settings():
         settings["prompt_without_articles"] = data["prompt_without_articles"]
     if "custom_query" in data:
         settings["custom_query"] = data["custom_query"]
+    # News source-specific query templates
+    for key in ["query_yahoo", "query_newsapi", "query_google", "query_naver"]:
+        if key in data:
+            settings[key] = str(data[key])[:500]
+    # Global market indices queries
+    for key in ["query_market_us", "query_market_korea", "query_market_china", "query_market_hongkong", "query_market_japan", "query_market_europe"]:
+        if key in data:
+            settings[key] = str(data[key])[:500]
     if "change_threshold" in data:
         try:
             val = float(data["change_threshold"])
@@ -1416,7 +1436,12 @@ def search_market_news_for_region(region, trade_date, target_date=None):
     if not cfg:
         return []
     ticker = cfg["ticker"]
-    query = cfg["query"]
+    
+    # Get region-specific query from settings
+    settings = load_settings()
+    query_key = f"query_market_{region.lower().replace(' ', '_')}"
+    query = settings.get(query_key) or cfg["query"]
+    
     try:
         return search_all_news_articles(
             ticker, query, trade_date,
@@ -1546,7 +1571,7 @@ def search_news_articles_yahoo_finance(ticker, company_name):
         return []
 
 
-def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_query=None):
+def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_query=None, settings=None):
     """Search news from NewsAPI.org (requires NEWS_API_KEY).
 
     If target_date is provided, searches articles from target_date to target_date+1.
@@ -1554,7 +1579,9 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_
     if not NEWS_API_KEY:
         return []
     try:
-        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock')
+        # Use source-specific query template from settings, fallback to custom_query or default
+        query_template = (settings or {}).get("query_newsapi") or custom_query or f'"{company_name}" OR "{ticker}" stock'
+        query = build_search_query(query_template, company_name, ticker, f'"{company_name}" OR "{ticker}" stock')
         url = "https://newsapi.org/v2/everything"
         params = {
             "q": query,
@@ -1593,7 +1620,7 @@ def search_news_articles_newsapi(ticker, company_name, target_date=None, custom_
         return []
 
 
-def search_news_articles_google(ticker, company_name, trade_date, target_date=None, custom_query=None):
+def search_news_articles_google(ticker, company_name, trade_date, target_date=None, custom_query=None, settings=None):
     """Search news from Google Custom Search API (requires GOOGLE_API_KEY + GOOGLE_CSE_ID).
 
     If target_date is provided, restricts results to that date range (date to date+1).
@@ -1602,7 +1629,9 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
         return []
 
     try:
-        query = build_search_query(custom_query, company_name, ticker, f'"{company_name}" OR "{ticker}" stock news')
+        # Use source-specific query template from settings, fallback to custom_query or default
+        query_template = (settings or {}).get("query_google") or custom_query or f'"{company_name}" OR "{ticker}" stock news'
+        query = build_search_query(query_template, company_name, ticker, f'"{company_name}" OR "{ticker}" stock news')
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
             "key": GOOGLE_API_KEY,
@@ -1684,7 +1713,7 @@ def search_news_articles_google(ticker, company_name, trade_date, target_date=No
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def search_news_articles_naver(company_name, ticker="", target_date=None, custom_query=None):
+def search_news_articles_naver(company_name, ticker="", target_date=None, custom_query=None, settings=None):
     """Search Korean news from Naver Search API (requires NAVER_CLIENT_ID + NAVER_CLIENT_SECRET).
 
     Returns articles sorted by publish date (newest first).
@@ -1693,7 +1722,9 @@ def search_news_articles_naver(company_name, ticker="", target_date=None, custom
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
         return []
     try:
-        query = build_search_query(custom_query, company_name, ticker, company_name)
+        # Use source-specific query template from settings, fallback to custom_query or default
+        query_template = (settings or {}).get("query_naver") or custom_query or company_name
+        query = build_search_query(query_template, company_name, ticker, company_name)
         url = "https://openapi.naver.com/v1/search/news.json"
         params = {"query": query, "display": 5, "sort": "date"}
         headers = {
@@ -1873,15 +1904,15 @@ def search_all_news_articles(ticker, company_name, trade_date, target_date=None,
 
     # 2. NewsAPI — optional
     if NEWS_API_KEY and settings.get("newsapi_enabled", True):
-        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_newsapi(ticker, company_name, target_date=target_date, custom_query=custom_query, settings=settings))
 
     # 3. Google CSE — optional
     if GOOGLE_API_KEY and GOOGLE_CSE_ID and settings.get("google_cse_enabled", True):
-        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_google(ticker, company_name, trade_date, target_date=target_date, custom_query=custom_query, settings=settings))
 
     # 4. Naver — optional (Korean news, especially useful for KS/KQ tickers and Korean market indices)
     if NAVER_CLIENT_ID and NAVER_CLIENT_SECRET and settings.get("naver_enabled", True):
-        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query))
+        all_articles.extend(search_news_articles_naver(company_name, ticker=ticker, target_date=target_date, custom_query=custom_query, settings=settings))
 
     # 5. Gmail 메모 — optional (user's own memos sent to registered Gmail account)
     if gmail_articles is not None:
