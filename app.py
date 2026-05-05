@@ -257,11 +257,6 @@ DEFAULT_TICKERS = [
     {"ticker": "030000.KS",  "category": "삼성", "name": "제일기획"},
     {"ticker": "0126Z0.KS",  "category": "삼성", "name": "에피스홀딩스"},
     {"ticker": "207940.KS",  "category": "삼성", "name": "로직스"},
-    {"ticker": "000810.KS",  "category": "삼성", "name": "삼성화재"},
-    {"ticker": "029780.KS",  "category": "삼성", "name": "삼성카드"},
-    {"ticker": "008770.KS",  "category": "삼성", "name": "호텔신라"},
-    {"ticker": "016360.KS",  "category": "삼성", "name": "삼성증권"},
-    {"ticker": "028050.KS",  "category": "삼성", "name": "삼성엔지니어링"},
 ]
 
 # Global market indices
