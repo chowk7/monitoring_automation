@@ -1349,16 +1349,22 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
 
-        # Deduplicate: keep the last bar per UTC date
-        # (Yahoo Finance sometimes returns 2 bars for the same day, e.g. open + close snapshot)
+        # Deduplicate: keep the last bar per local market date (using timezone offset)
+        market_tz = timezone(timedelta(hours=tz_hours))
         seen: dict = {}
         for ts, c in valid:
-            seen[datetime.utcfromtimestamp(ts).date()] = (ts, c)
+            local_date = datetime.fromtimestamp(ts, market_tz).date()
+            seen[local_date] = (ts, c)
         valid = sorted(seen.values())
 
         if target_date:
-            filtered = [(ts, c) for ts, c in valid
-                        if datetime.utcfromtimestamp(ts).date() <= target_date]
+            # Filter using local market date, not UTC
+            market_tz = timezone(timedelta(hours=tz_hours))
+            filtered = []
+            for ts, c in valid:
+                local_date = datetime.fromtimestamp(ts, market_tz).date()
+                if local_date <= target_date:
+                    filtered.append((ts, c))
             if len(filtered) >= 2:
                 valid = filtered
 
@@ -1372,7 +1378,7 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         prev_close = valid[-2][1]
         last_close = valid[-1][1]
         change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.utcfromtimestamp(valid[-1][0]).date()
+        last_date = datetime.fromtimestamp(valid[-1][0], market_tz).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         return {
