@@ -2082,16 +2082,22 @@ def run_scheduled_analysis(target_date=None):
         ticker_meta = {t["ticker"]: t for t in ticker_objects}
         all_stocks = {}
         filtered_list = []
+        # 휴장 시장列表 (error에 "Insufficient data"가 포함된 경우 휴장으로 간주)
         for t in ticker_objects:
             result = fetch_single_ticker(t["ticker"], target_date=target_date)
+            err_msg = result.get("error", "")
+            is_market_closed = "Insufficient data" in err_msg if err_msg else False
             all_stocks[t["ticker"]] = {
                 "name": result.get("name") or t.get("name") or t["ticker"],
                 "change_pct": result.get("change_pct", 0),
                 "category": t.get("category", ""),
             }
-            if "error" in result:
-                all_stocks[t["ticker"]]["error"] = result["error"]
-            if abs(result.get("change_pct", 0)) >= change_threshold:
+            if err_msg:
+                all_stocks[t["ticker"]]["error"] = err_msg
+            if is_market_closed:
+                all_stocks[t["ticker"]]["is_closed"] = True
+            # 휴장이 아닌 종목을 대상으로 필터링
+            if not is_market_closed and abs(result.get("change_pct", 0)) >= change_threshold:
                 filtered_list.append((t["ticker"], result))
         filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
         # 카테고리별 평균 등락률 계산
@@ -2100,7 +2106,7 @@ def run_scheduled_analysis(target_date=None):
             cat = info.get("category") or "기타"
             if cat not in category_stats:
                 category_stats[cat] = {"total": 0.0, "count": 0}
-            if not info.get("error"):
+            if not info.get("error") and not info.get("is_closed"):
                 category_stats[cat]["total"] += info["change_pct"]
                 category_stats[cat]["count"] += 1
         for cat in category_stats:
