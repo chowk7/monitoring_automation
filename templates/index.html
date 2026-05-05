@@ -164,6 +164,90 @@
                     <small class="settings-hint" style="display:block;margin-top:4px;">사용 가능한 변수: <code>{종목명}</code> <code>{ticker}</code> · NewsAPI, Google CSE 검색어에 적용</small>
                 </div>
 
+                <!-- News Source-Specific Query Templates -->
+                <div class="settings-row" style="flex-direction:column;align-items:stretch;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                        <label>뉴스 소스별 검색어</label>
+                        <button class="btn btn-toggle" id="sourceQueryToggle" style="margin-left:0;">펼치기 ▼</button>
+                    </div>
+                    <div id="sourceQueryBody" style="display:none;">
+                        <small class="settings-hint" style="margin-bottom:12px;display:block;">각 소스별 검색어 템플릿을 설정하세요. 사용 가능한 변수: <code>{name}</code> <code>{ticker}</code></small>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryYahoo" style="width:90px;">Yahoo:</label>
+                            <input type="text" id="queryYahoo" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="{name} {ticker} stock" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="yahoo">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryNewsapi" style="width:90px;">NewsAPI:</label>
+                            <input type="text" id="queryNewsapi" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="{name} stock OR {ticker}" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="newsapi">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryGoogle" style="width:90px;">Google:</label>
+                            <input type="text" id="queryGoogle" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="{name} stock {ticker}" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="google">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryNaver" style="width:90px;">Naver:</label>
+                            <input type="text" id="queryNaver" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="{name}股价" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="naver">저장</button>
+                        </div>
+                        
+                        <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
+                        <label style="margin-bottom:8px;display:block;">글로벌 시장 지수 검색어</label>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketUs" style="width:90px;">미국:</label>
+                            <input type="text" id="queryMarketUs" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="US stock market" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_us">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketKorea" style="width:90px;">한국:</label>
+                            <input type="text" id="queryMarketKorea" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="코스피 코스닥" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_korea">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketChina" style="width:90px;">중국:</label>
+                            <input type="text" id="queryMarketChina" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="China stock market" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_china">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketHongkong" style="width:90px;">홍콩:</label>
+                            <input type="text" id="queryMarketHongkong" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="Hong Kong stock market" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_hongkong">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketJapan" style="width:90px;">일본:</label>
+                            <input type="text" id="queryMarketJapan" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="Japan stock market" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_japan">저장</button>
+                        </div>
+                        
+                        <div class="settings-row" style="flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <label for="queryMarketEurope" style="width:90px;">유럽:</label>
+                            <input type="text" id="queryMarketEurope" class="model-select" style="flex:1;min-width:200px;"
+                                   placeholder="Europe stock market" autocomplete="off">
+                            <button class="btn btn-save-model btn-save-source-query" data-source="market_europe">저장</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Gemini Prompt Editor -->
                 <div class="prompt-settings-row">
                     <div class="prompt-section-header">

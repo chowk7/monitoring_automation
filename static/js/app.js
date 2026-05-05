@@ -185,6 +185,55 @@ document.addEventListener("DOMContentLoaded", () => {
         saveCustomQueryBtn.addEventListener("click", saveCustomQuery);
     }
 
+    // Source query templates toggle
+    const sourceQueryToggle = document.getElementById("sourceQueryToggle");
+    const sourceQueryBody = document.getElementById("sourceQueryBody");
+    if (sourceQueryToggle) {
+        sourceQueryToggle.addEventListener("click", () => {
+            const isOpen = sourceQueryBody.style.display !== "none";
+            sourceQueryBody.style.display = isOpen ? "none" : "block";
+            sourceQueryToggle.textContent = isOpen ? "펼치기 ▼" : "접기 ▲";
+        });
+    }
+
+    // Source query save buttons
+    document.querySelectorAll(".btn-save-source-query").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const source = btn.dataset.source;
+            const inputMap = {
+                "yahoo": "queryYahoo",
+                "newsapi": "queryNewsapi",
+                "google": "queryGoogle",
+                "naver": "queryNaver",
+                "market_us": "queryMarketUs",
+                "market_korea": "queryMarketKorea",
+                "market_china": "queryMarketChina",
+                "market_hongkong": "queryMarketHongkong",
+                "market_japan": "queryMarketJapan",
+                "market_europe": "queryMarketEurope",
+            };
+            const keyMap = {
+                "yahoo": "query_yahoo",
+                "newsapi": "query_newsapi",
+                "google": "query_google",
+                "naver": "query_naver",
+                "market_us": "query_market_us",
+                "market_korea": "query_market_korea",
+                "market_china": "query_market_china",
+                "market_hongkong": "query_market_hongkong",
+                "market_japan": "query_market_japan",
+                "market_europe": "query_market_europe",
+            };
+            const inputId = inputMap[source];
+            const key = keyMap[source];
+            const input = document.getElementById(inputId);
+            if (!input || !key) return;
+            
+            const value = input.value.trim();
+            saveSourceQuery(key, value, btn);
+        });
+    });
+
     // Save threshold
     if (saveThresholdBtn) {
         saveThresholdBtn.addEventListener("click", saveThreshold);
@@ -332,6 +381,24 @@ document.addEventListener("DOMContentLoaded", () => {
                 customQueryInput.value = data.custom_query || "";
             }
 
+            // Load source-specific query templates
+            const queryInputs = {
+                "queryYahoo": data.query_yahoo,
+                "queryNewsapi": data.query_newsapi,
+                "queryGoogle": data.query_google,
+                "queryNaver": data.query_naver,
+                "queryMarketUs": data.query_market_us,
+                "queryMarketKorea": data.query_market_korea,
+                "queryMarketChina": data.query_market_china,
+                "queryMarketHongkong": data.query_market_hongkong,
+                "queryMarketJapan": data.query_market_japan,
+                "queryMarketEurope": data.query_market_europe,
+            };
+            Object.entries(queryInputs).forEach(([id, value]) => {
+                const el = document.getElementById(id);
+                if (el) el.value = value || "";
+            });
+
             // Load change threshold
             if (data.change_threshold !== undefined) {
                 currentThreshold = parseFloat(data.change_threshold) || 5.0;
@@ -421,6 +488,24 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             if (resp.ok) {
                 showSuccess(query ? `검색어 템플릿 저장됨: ${query}` : "검색어 기본값으로 초기화됨");
+            } else {
+                showError("저장 실패");
+            }
+        } catch (err) {
+            showError("저장 오류");
+        }
+    }
+
+    async function saveSourceQuery(key, value, btn) {
+        try {
+            const resp = await fetch("/api/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [key]: value }),
+            });
+            if (resp.ok) {
+                const label = key.replace("query_", "").replace("market_", "market ");
+                showSuccess(value ? `${label} 검색어 저장됨` : "기본값으로 초기화됨");
             } else {
                 showError("저장 실패");
             }

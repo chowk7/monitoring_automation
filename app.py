@@ -1487,28 +1487,33 @@ def analyze_market_indices_with_gemini(indices_data, articles_by_region, model=N
 {articles_text}
 
 Instructions:
-1. 아래 순서대로 각 지역을 반드시 빈 줄로 구분하여 출력해라:
-   1) 미국  2) 한국  3) 중국/홍콩  4) 일본  5) 유럽
-2. 각 지역 형식 (반드시 이 형식 준수):
-   🇺🇸 미국: <한글 분석 1-2문장>
-   🇺🇸 US: <English translation>
+1. 아래 순서대로 각 지역을 반드시 구분선(ㅡ)으로 구분하여 출력:
+   ㅡ US 미국
+   [한국어 분석 1-2문장]
+   [English analysis 1-2 sentences]
 
-   🇰🇷 한국: <한글 분석>
-   🇰🇷 Korea: <English>
+   ㅡ 한국
+   [한국어 분석 1-2문장]
+   [English analysis 1-2 sentences]
 
-   🇨🇳 중국/홍콩: <한글 분석>
-   🇨🇳 China/HK: <English>
+   ㅡ 중국/홍콩
+   [한국어 분석 1-2문장]
+   [English analysis 1-2 sentences]
 
-   🇯🇵 일본: <한글 분석>
-   🇯🇵 Japan: <English>
+   ㅡ 일본
+   [한국어 분석 1-2문장]
+   [English analysis 1-2 sentences]
 
-   🇪🇺 유럽: <한글 분석>
-   🇪🇺 Europe: <English>
-3. 뉴스 근거가 없는 지역은 해당 지역 아래에 "정보 없음 / No data"로 표시해라.
-4. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용해라.
-5. 마지막에 빈 줄 후 전체 시장 분위기를 1문장으로 요약 (한글/영문):
-   📊 요약: <한글>
-   📊 Summary: <English>"""
+   ㅡ 유럽
+   [한국어 분석 1-2문장]
+   [English analysis 1-2 sentences]
+
+2. 뉴스 근거가 없는 지역은 "정보 없음 / No data"로 표시.
+3. 추측하거나 자체 지식을 사용하지 마라. 오직 제공된 기사 내용만 활용.
+4. 마지막에 구분선 후 전체 시장 분위기를 1문장으로 요약:
+   ㅡ 전체 요약
+   [한국어]
+   [English]"""
 
     try:
         response = client.models.generate_content(model=model, contents=prompt)
