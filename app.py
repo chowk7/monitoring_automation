@@ -1412,10 +1412,16 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         last_date = datetime.fromtimestamp(valid[-1][0], market_tz).date()
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
+        # Check if market was closed on target_date:
+        # last_date < target_date means the most recent bar is BEFORE target,
+        # so target_date market data is not available (holiday/weekend)
+        is_closed = target_date is not None and last_date < target_date
+
         return {
             "name": name,
             "change_pct": round(float(change_pct), 2),
             "date": str(last_date),
+            "is_closed": is_closed,
         }
     except Exception as e:
         return {
@@ -2076,29 +2082,54 @@ def run_scheduled_analysis(target_date=None):
         market_data = {"indices": indices_data, "analysis": market_analysis, "date": trade_date_str}
         gc.collect()
 
+        # 휴장 시장 목록을 시장 지수 데이터에서 구축
+        closed_markets = set()
+        for idx in indices_data:
+            if idx.get("is_closed"):
+                closed_markets.add(idx["region"])
+
+        # 티커suffix → 시장region 매핑
+        def ticker_region(ticker):
+            t = ticker.upper()
+            if t.endswith((".KS", ".KQ")):
+                return "한국"
+            if t.endswith(".T"):
+                return "일본"
+            if t.endswith(".TW"):
+                return "대만"
+            if t.endswith(".HK"):
+                return "홍콩"
+            if t.endswith((".SS", ".SZ")):
+                return "중국"
+            return None  # 미국/유럽 등
+
         # Phase 1: 종목 데이터 수집 + 필터링
         logger.info("Fetching ticker data...")
         ticker_objects = load_tickers_from_csv()
         ticker_meta = {t["ticker"]: t for t in ticker_objects}
         all_stocks = {}
         filtered_list = []
-        # 휴장 시장列表 (error에 "Insufficient data"가 포함된 경우 휴장으로 간주)
+        # 휴장 시장 목록 (error에 "Insufficient data"가 포함된 경우 휴장으로 간주)
         for t in ticker_objects:
-            result = fetch_single_ticker(t["ticker"], target_date=target_date)
+            tkr = t["ticker"]
+            tkr_region = ticker_region(tkr)
+            # 해당 시장이 휴장 목록에 있으면跳过
+            is_closed_market = tkr_region is not None and tkr_region in closed_markets
+            result = fetch_single_ticker(tkr, target_date=target_date)
             err_msg = result.get("error", "")
-            is_market_closed = "Insufficient data" in err_msg if err_msg else False
-            all_stocks[t["ticker"]] = {
-                "name": result.get("name") or t.get("name") or t["ticker"],
+            is_market_closed = is_closed_market or result.get("is_closed", False) or ("Insufficient data" in err_msg if err_msg else False)
+            all_stocks[tkr] = {
+                "name": result.get("name") or t.get("name") or tkr,
                 "change_pct": result.get("change_pct", 0),
                 "category": t.get("category", ""),
             }
             if err_msg:
-                all_stocks[t["ticker"]]["error"] = err_msg
+                all_stocks[tkr]["error"] = err_msg
             if is_market_closed:
-                all_stocks[t["ticker"]]["is_closed"] = True
+                all_stocks[tkr]["is_closed"] = True
             # 휴장이 아닌 종목을 대상으로 필터링
             if not is_market_closed and abs(result.get("change_pct", 0)) >= change_threshold:
-                filtered_list.append((t["ticker"], result))
+                filtered_list.append((tkr, result))
         filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
         # 카테고리별 평균 등락률 계산
         category_stats = {}
