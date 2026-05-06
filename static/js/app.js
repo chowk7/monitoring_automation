@@ -846,10 +846,10 @@ document.addEventListener("DOMContentLoaded", () => {
             dateLabel = `${m}/${d}`;
         } catch (e) {}
 
-        // 색상 적용: 양수 파랑(0,0,255) △, 음수 빨강(255,0,0) △
+        // 양수 1.23% (파랑 0,0,255), 음수 △1.23% (빨강 255,0,0)
         const fmtChgHtml = (v) => {
             const absVal = Math.abs(v).toFixed(2);
-            const label = `△${absVal}%`;
+            const label = v < 0 ? `△${absVal}%` : `${absVal}%`;
             if (v < 0) {
                 return `<span style="color:rgb(255,0,0)">${escapeHtml(label)}</span>`;
             } else {
@@ -890,7 +890,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
             if (marketParts.length > 0) {
-                lines.push("시&nbsp;&nbsp;장");
+                lines.push("<b><u>시&nbsp;&nbsp;장</u></b>");
                 lines.push(...marketParts);
                 lines.push("");
             }
@@ -898,7 +898,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 개별회사 section
         if (currentResults.length > 0) {
-            lines.push("개별회사");
+            lines.push("<b><u>개별회사</u></b>");
             for (const r of currentResults) {
                 const analysis = escapeHtml((r.analysis || "").replace(/\n+/g, " ").trim());
                 lines.push(`- ${escapeHtml(r.name)} (${fmtChgHtml(r.change_pct)}): ${analysis}`);
@@ -939,7 +939,7 @@ document.addEventListener("DOMContentLoaded", () => {
             dateLabel = `${m}/${d}`;
         } catch (e) {}
 
-        const fmtChg = (v) => `△${Math.abs(v).toFixed(2)}%`;
+        const fmtChg = (v) => v < 0 ? `△${Math.abs(v).toFixed(2)}%` : `${v.toFixed(2)}%`;
 
         const lines = [];
         lines.push("안녕하십니까,");
@@ -974,7 +974,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
             if (marketParts.length > 0) {
-                lines.push("시  장");
+                lines.push("[시  장]");
                 lines.push(...marketParts);
                 lines.push("");
             }
@@ -982,7 +982,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 개별회사 section
         if (currentResults.length > 0) {
-            lines.push("개별회사");
+            lines.push("[개별회사]");
             for (const r of currentResults) {
                 const analysis = (r.analysis || "").replace(/\n+/g, " ").trim();
                 lines.push(`- ${r.name} (${fmtChg(r.change_pct)}): ${analysis}`);
