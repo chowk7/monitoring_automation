@@ -1005,23 +1005,42 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Copy email text to clipboard
+    // Copy email text to clipboard (HTML rich text + plain fallback)
     document.addEventListener("click", async (e) => {
         if (e.target && e.target.id === "copyEmailBtn") {
             const preview = document.getElementById("emailCopyPreview");
-            if (preview && preview.textContent) {
+            if (!preview) return;
+            const btn = e.target;
+            const originalText = btn.textContent;
+
+            // Build rich HTML clipboard content
+            const innerHtml = preview.innerHTML;
+            const clipboardHtml = `<div style="font-family:'맑은고딕',Malgun Gothic,Arial,sans-serif;font-size:10pt;background:transparent;color:#000000;">${innerHtml}</div>`;
+            const plainText = preview.dataset.plainText || preview.textContent || "";
+
+            try {
+                const item = new ClipboardItem({
+                    "text/html": new Blob([clipboardHtml], { type: "text/html" }),
+                    "text/plain": new Blob([plainText], { type: "text/plain" }),
+                });
+                await navigator.clipboard.write([item]);
+                btn.textContent = "복사 완료!";
+                btn.style.background = "#10b981";
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.style.background = "";
+                }, 2000);
+            } catch (err) {
+                // Fallback to plain text
                 try {
-                    const plainText = preview.dataset.plainText || preview.textContent;
                     await navigator.clipboard.writeText(plainText);
-                    const btn = document.getElementById("copyEmailBtn");
-                    const originalText = btn.textContent;
                     btn.textContent = "복사 완료!";
                     btn.style.background = "#10b981";
                     setTimeout(() => {
                         btn.textContent = originalText;
                         btn.style.background = "";
                     }, 2000);
-                } catch (err) {
+                } catch (fallbackErr) {
                     showError("복사에 실패했습니다.");
                 }
             }
