@@ -844,7 +844,8 @@ def send_email_report():
 
     # Build HTML email
     today = datetime.now(KST).strftime("%Y-%m-%d")
-    subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {today}"
+    m, d = today.split("-")[1], today.split("-")[2]
+    subject = f"[{int(m)}/{int(d)}일 종가기준] 모니터링 업체 현황"
     html_body = build_email_html(results, today, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
 
     try:
@@ -2195,7 +2196,8 @@ def run_scheduled_analysis(target_date=None):
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
             return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
 
-        subject = f"[Stock Analyzer] 주가 변동 분석 리포트 {date_str}"
+        m2, d2 = date_str.split("-")[1], date_str.split("-")[2]
+        subject = f"[{int(m2)}/{int(d2)}일 종가기준] 모니터링 업체 현황"
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = EMAIL_FROM
