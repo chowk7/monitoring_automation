@@ -810,9 +810,14 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // Build email text preview directly in browser (no API call needed)
-    function buildEmailTextPreview() {
-        if (currentResults.length === 0) return;
+    // HTML 이스케이프 (XSS 방지)
+    function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // HTML 색상 적용된 이메일본문 생성 (innerHTML용)
+    function buildEmailTextPreviewHTML() {
+        if (currentResults.length === 0) return "";
 
         const MARKET_INDICES_MAP = {
             "^DJI":       { name: "Dow",       region: "미국" },
@@ -833,7 +838,6 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        // Get target date
         const dateInput = document.getElementById("dateInput");
         const dateStr = dateInput ? dateInput.value : new Date().toISOString().split("T")[0];
         let dateLabel = dateStr;
@@ -842,7 +846,100 @@ document.addEventListener("DOMContentLoaded", () => {
             dateLabel = `${m}/${d}`;
         } catch (e) {}
 
-        const fmtChg = (v) => v < 0 ? `△${Math.abs(v).toFixed(2)}%` : `${v.toFixed(2)}%`;
+        // 색상 적용: 양수 파랑(0,0,255) △, 음수 빨강(255,0,0) △
+        const fmtChgHtml = (v) => {
+            const absVal = Math.abs(v).toFixed(2);
+            const label = `△${absVal}%`;
+            if (v < 0) {
+                return `<span style="color:rgb(255,0,0)">${escapeHtml(label)}</span>`;
+            } else {
+                return `<span style="color:rgb(0,0,255)">${escapeHtml(label)}</span>`;
+            }
+        };
+
+        const lines = [];
+        lines.push(escapeHtml("안녕하십니까,"));
+        lines.push(escapeHtml(`${dateLabel}일 종가기준 모니터링 업체 현황 송부드립니다.`));
+        lines.push("");
+
+        // 시장 section
+        if (currentMarketData && currentMarketData.indices) {
+            const indexByTicker = {};
+            for (const m of currentMarketData.indices) {
+                if (!m.error) indexByTicker[m.ticker] = m;
+            }
+            const marketParts = [];
+            for (const [regionLabel, regions] of REGION_GROUPS) {
+                const tickers = Object.keys(MARKET_INDICES_MAP).filter(t =>
+                    MARKET_INDICES_MAP[t] && regions.includes(MARKET_INDICES_MAP[t].region)
+                );
+                const items = [];
+                for (const ticker of tickers) {
+                    if (indexByTicker[ticker]) {
+                        const m = indexByTicker[ticker];
+                        const display = escapeHtml(MARKET_INDICES_MAP[ticker]?.name || m.name || ticker);
+                        if (m.is_closed) {
+                            items.push(`${display} (휴장)`);
+                        } else {
+                            items.push(`${display} (${fmtChgHtml(m.change_pct)})`);
+                        }
+                    }
+                }
+                if (items.length > 0) {
+                    marketParts.push(`  - ${escapeHtml(regionLabel)} :  ${items.join(", ")}`);
+                }
+            }
+            if (marketParts.length > 0) {
+                lines.push("시&nbsp;&nbsp;장");
+                lines.push(...marketParts);
+                lines.push("");
+            }
+        }
+
+        // 개별회사 section
+        if (currentResults.length > 0) {
+            lines.push("개별회사");
+            for (const r of currentResults) {
+                const analysis = escapeHtml((r.analysis || "").replace(/\n+/g, " ").trim());
+                lines.push(`- ${escapeHtml(r.name)} (${fmtChgHtml(r.change_pct)}): ${analysis}`);
+            }
+        }
+
+        return lines.join("<br>");
+    }
+
+    // 클립보드 복사용 plain text (HTML 태그 없음)
+    function buildEmailTextPreviewPlain() {
+        if (currentResults.length === 0) return "";
+
+        const MARKET_INDICES_MAP = {
+            "^DJI":       { name: "Dow",       region: "미국" },
+            "^IXIC":      { name: "Nasdaq",    region: "미국" },
+            "^GSPC":      { name: "S&P 500",   region: "미국" },
+            "^KS11":      { name: "한\uad11코스피", region: "한국" },
+            "^KQ11":      { name: "코스닥",    region: "한국" },
+            "000001.SS":  { name: "中상해",    region: "중국" },
+            "^HSI":       { name: "홍콩항셍",  region: "홍콩" },
+            "^N225":      { name: "日니케이",   region: "일본" },
+            "^FTSE":      { name: "英FTSE",     region: "영국" },
+            "^FCHI":      { name: "CAC",        region: "프랑스" },
+            "^GDAXI":     { name: "獨DAX",      region: "독일" },
+        };
+        const REGION_GROUPS = [
+            ["미\u00a0\u00a0국", ["미국"]],
+            ["아시아",           ["한국", "중국", "홍콩", "일본"]],
+            ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
+        ];
+
+        const dateInput = document.getElementById("dateInput");
+        const dateStr = dateInput ? dateInput.value : new Date().toISOString().split("T")[0];
+        let dateLabel = dateStr;
+        try {
+            const [y, m, d] = dateStr.split("-");
+            dateLabel = `${m}/${d}`;
+        } catch (e) {}
+
+        const fmtChg = (v) => `△${Math.abs(v).toFixed(2)}%`;
 
         const lines = [];
         lines.push("안녕하십니까,");
@@ -896,12 +993,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function updateEmailCopyPreview() {
-        const text = buildEmailTextPreview();
-        if (!text) return;
+        const html = buildEmailTextPreviewHTML();
+        if (!html) return;
         const section = document.getElementById("emailCopySection");
         const preview = document.getElementById("emailCopyPreview");
         if (section && preview) {
-            preview.textContent = text;
+            preview.innerHTML = html;
+            // 클립보드 복사용 plain text 저장
+            preview.dataset.plainText = buildEmailTextPreviewPlain();
             section.style.display = "block";
         }
     }
@@ -912,7 +1011,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const preview = document.getElementById("emailCopyPreview");
             if (preview && preview.textContent) {
                 try {
-                    await navigator.clipboard.writeText(preview.textContent);
+                    const plainText = preview.dataset.plainText || preview.textContent;
+                    await navigator.clipboard.writeText(plainText);
                     const btn = document.getElementById("copyEmailBtn");
                     const originalText = btn.textContent;
                     btn.textContent = "복사 완료!";
