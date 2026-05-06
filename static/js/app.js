@@ -925,7 +925,9 @@ document.addEventListener("DOMContentLoaded", () => {
             lines.push("<b><u>개별회사</u></b>");
             for (const r of currentResults) {
                 const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
-                lines.push(`- ${escapeHtml(r.name)} (${fmtChgHtml(r.change_pct)}): ${analysis}`);
+                // 개별회사 등락률은 소수점 1자리
+                const chg1 = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
+                lines.push(`- ${escapeHtml(r.name)} (${chg1}): ${analysis}`);
             }
         }
 
@@ -1009,7 +1011,9 @@ document.addEventListener("DOMContentLoaded", () => {
             lines.push("[개별회사]");
             for (const r of currentResults) {
                 const analysis = stripEnglishAndRefs(r.analysis || "");
-                lines.push(`- ${r.name} (${fmtChg(r.change_pct)}): ${analysis}`);
+                // 개별회사 등락률은 소수점 1자리
+                const chg1 = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
+                lines.push(`- ${r.name} (${chg1}): ${analysis}`);
             }
         }
 
@@ -1344,9 +1348,9 @@ document.addEventListener("DOMContentLoaded", () => {
                             if (stopBtn) stopBtn.style.display = "none";
 
                             // Auto-send email and show button if results exist
+                            // Show email send button (don't auto-send, McAfee blocks POST)
                             if (sendEmailBtn && currentResults.length > 0) {
                                 sendEmailBtn.style.display = "inline-flex";
-                                sendEmailReport();
                             }
 
                             // Update email copy preview
