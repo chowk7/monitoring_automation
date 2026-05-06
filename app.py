@@ -1260,7 +1260,7 @@ def analyze_stream():
                     used_articles = result["used_articles"]
                     batch_results.append({
                         "ticker": ticker,
-                        "name": info.get("name", ticker),
+                        "name": meta.get("name") or info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": result["analysis"],
                         "articles_found": len(articles) > 0,
@@ -1283,7 +1283,7 @@ def analyze_stream():
                     logger.error(f"Error processing {ticker}: {e}")
                     batch_results.append({
                         "ticker": ticker,
-                        "name": info.get("name", ticker),
+                        "name": meta.get("name") or info.get("name", ticker),
                         "change_pct": info["change_pct"],
                         "analysis": f"분석 실패: {str(e)}",
                         "articles_found": False,
@@ -2169,7 +2169,7 @@ def run_scheduled_analysis(target_date=None):
                 meta = ticker_meta.get(ticker, {})
                 results.append({
                     "ticker": ticker,
-                    "name": info.get("name", ticker) or meta.get("name", ticker),
+                    "name": meta.get("name") or info.get("name", ticker),
                     "change_pct": info["change_pct"],
                     "analysis": result["analysis"],
                     "articles_found": len(articles) > 0,
