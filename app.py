@@ -1420,9 +1420,15 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
         # Check if market was closed on target_date:
-        # last_date < target_date means the most recent bar is BEFORE target,
-        # so target_date market data is not available (holiday/weekend)
-        is_closed = target_date is not None and last_date < target_date
+        # For stocks (T+1 settlement): last_date < target_date means closed
+        # For indices: need at least 2 days difference to avoid false positives
+        #   (1 day difference = today's data not recorded yet, not closed)
+        #   (2+ days difference = weekend or holiday)
+        is_closed = False
+        if target_date is not None and last_date < target_date:
+            days_diff = (target_date - last_date).days
+            if days_diff >= 2:
+                is_closed = True  # Weekend or holiday
 
         return {
             "name": name,
@@ -1444,12 +1450,13 @@ def fetch_all_market_indices(target_date=None):
     for idx in MARKET_INDICES:
         data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_hours=idx.get("tz_hours", 0))
         returned_date = data.get("date", "")
-        # 휴장 감지: target_date가 지정되었고, 반환된 날짜가 target_date보다 이전이면 휴장
-        is_closed = False
+        # 휴장 감지: 2일 이상 차이 나면 휴장 (1일 차이는 오늘 데이터 미기록일 수 있음)
+        is_closed = data.get("is_closed", False)
         if target_date and returned_date:
             try:
-                if datetime.fromisoformat(returned_date).date() < target_date:
-                    is_closed = True
+                returned_date_obj = datetime.fromisoformat(returned_date).date()
+                days_diff = (target_date - returned_date_obj).days
+                is_closed = days_diff >= 2
             except ValueError:
                 pass
         results.append({
