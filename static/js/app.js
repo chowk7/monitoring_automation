@@ -815,6 +815,30 @@ document.addEventListener("DOMContentLoaded", () => {
         return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    /**
+     * Remove English summary sentences and REFS:[...] tag from Gemini analysis text.
+     * English sentences are identified as lines/segments with only ASCII Latin letters.
+     */
+    function stripEnglishAndRefs(text) {
+        if (!text) return "";
+        // Remove REFS:[...] tag
+        let cleaned = text.replace(/REFS:\[[^\]]*\]/g, "").trim();
+        // Split by newlines, keep only Korean/Chinese/Japanese lines (non-ASCII dominant)
+        const lines = cleaned.split(/\n/);
+        const koreanLines = [];
+        for (const line of lines) {
+            // Skip empty lines
+            if (!line.trim()) continue;
+            // Count ASCII Latin letters
+            const asciiCount = (line.match(/[A-Za-z]/g) || []).length;
+            const totalChars = line.replace(/\s/g, "").length;
+            // If more than 30% ASCII, treat as English and skip
+            if (totalChars > 0 && asciiCount / totalChars > 0.3) continue;
+            koreanLines.push(line);
+        }
+        return koreanLines.join(" ").replace(/\s+/g, " ").trim();
+    }
+
     // HTML 색상 적용된 이메일본문 생성 (innerHTML용)
     function buildEmailTextPreviewHTML() {
         if (currentResults.length === 0) return "";
@@ -900,7 +924,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentResults.length > 0) {
             lines.push("<b><u>개별회사</u></b>");
             for (const r of currentResults) {
-                const analysis = escapeHtml((r.analysis || "").replace(/\n+/g, " ").trim());
+                const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
                 lines.push(`- ${escapeHtml(r.name)} (${fmtChgHtml(r.change_pct)}): ${analysis}`);
             }
         }
@@ -984,7 +1008,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (currentResults.length > 0) {
             lines.push("[개별회사]");
             for (const r of currentResults) {
-                const analysis = (r.analysis || "").replace(/\n+/g, " ").trim();
+                const analysis = stripEnglishAndRefs(r.analysis || "");
                 lines.push(`- ${r.name} (${fmtChg(r.change_pct)}): ${analysis}`);
             }
         }
