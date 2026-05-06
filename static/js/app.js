@@ -811,7 +811,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function updateEmailCopyPreview() {
-        if (currentResults.length === 0) return;
+        console.log("[preview] called, currentResults.length=", currentResults.length);
+        if (currentResults.length === 0) {
+            console.warn("[preview] no results, skipping");
+            return;
+        }
         try {
             const targetDate = document.getElementById("dateInput")?.value || new Date().toISOString().split("T")[0];
             const resp = await fetch("/api/email-preview", {
@@ -819,17 +823,24 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ results: currentResults, market_data: currentMarketData, date: targetDate }),
             });
-            const data = await resp.json();
-            if (resp.ok && data.text) {
-                const section = document.getElementById("emailCopySection");
-                const preview = document.getElementById("emailCopyPreview");
-                if (section && preview) {
-                    preview.textContent = data.text;
-                    section.style.display = "block";
+            console.log("[preview] response status=", resp.status);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.text) {
+                    const section = document.getElementById("emailCopySection");
+                    const preview = document.getElementById("emailCopyPreview");
+                    if (section && preview) {
+                        preview.textContent = data.text;
+                        section.style.display = "block";
+                        console.log("[preview] shown successfully");
+                    }
                 }
+            } else {
+                console.error("[preview] API error:", resp.status, await resp.text());
+                showError(`이메일 미리보기 실패 (${resp.status})`);
             }
         } catch (err) {
-            console.error("Email preview error:", err);
+            console.error("[preview] network error:", err);
         }
     }
 
