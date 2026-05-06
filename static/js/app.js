@@ -899,14 +899,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 );
                 const items = [];
                 for (const ticker of tickers) {
-                    if (indexByTicker[ticker]) {
-                        const m = indexByTicker[ticker];
-                        const display = escapeHtml(MARKET_INDICES_MAP[ticker]?.name || m.name || ticker);
-                        if (m.is_closed) {
-                            items.push(`${display} (휴장)`);
-                        } else {
-                            items.push(`${display} (${fmtChgHtml(m.change_pct)})`);
-                        }
+                    // market data not received yet - skip (don't show wrong 휴장)
+                    if (!indexByTicker[ticker]) continue;
+                    const m = indexByTicker[ticker];
+                    const display = escapeHtml(MARKET_INDICES_MAP[ticker]?.name || m.name || ticker);
+                    // If is_closed but we have valid change_pct, market was actually trading
+                    const isReallyClosed = m.is_closed && (m.change_pct === 0 || m.change_pct == null);
+                    if (isReallyClosed) {
+                        items.push(`${display} (휴장)`);
+                    } else {
+                        items.push(`${display} (${fmtChgHtml(m.change_pct)})`);
                     }
                 }
                 if (items.length > 0) {
@@ -985,14 +987,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 );
                 const items = [];
                 for (const ticker of tickers) {
-                    if (indexByTicker[ticker]) {
-                        const m = indexByTicker[ticker];
-                        const display = MARKET_INDICES_MAP[ticker]?.name || m.name || ticker;
-                        if (m.is_closed) {
-                            items.push(`${display} (휴장)`);
-                        } else {
-                            items.push(`${display} (${fmtChg(m.change_pct)})`);
-                        }
+                    // market data not received yet - skip (don't show wrong 휴장)
+                    if (!indexByTicker[ticker]) continue;
+                    const m = indexByTicker[ticker];
+                    const display = MARKET_INDICES_MAP[ticker]?.name || m.name || ticker;
+                    // If is_closed but we have valid change_pct, market was actually trading
+                    const isReallyClosed = m.is_closed && (m.change_pct === 0 || m.change_pct == null);
+                    if (isReallyClosed) {
+                        items.push(`${display} (휴장)`);
+                    } else {
+                        items.push(`${display} (${fmtChg(m.change_pct)})`);
                     }
                 }
                 if (items.length > 0) {
