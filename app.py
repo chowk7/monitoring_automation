@@ -347,6 +347,11 @@ def get_kst_today():
     return datetime.now(KST).date()
 
 
+def get_kst_yesterday():
+    """Return yesterday's date in KST (UTC+9)."""
+    return (datetime.now(KST) - timedelta(days=1)).date()
+
+
 # ─── Settings Management ──────────────────────────────────────────────────────
 
 def load_settings():
@@ -2284,7 +2289,7 @@ def webhook_run_analysis():
     if not provided_token or provided_token != expected_token:
         return jsonify({"error": "Unauthorized"}), 401
 
-    # 날짜 파라미터 (없으면 오늘 KST)
+    # 날짜 파라미터 (없으면 어제 KST)
     date_str = request.args.get("date", "") or (request.get_json(silent=True) or {}).get("date", "")
     target_date = None
     if date_str:
@@ -2292,6 +2297,8 @@ def webhook_run_analysis():
             target_date = date_cls.fromisoformat(date_str)
         except ValueError:
             pass
+    else:
+        target_date = get_kst_yesterday()
 
     result = run_scheduled_analysis(target_date=target_date)
     return jsonify(result)
