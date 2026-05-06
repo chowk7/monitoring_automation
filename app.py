@@ -1243,6 +1243,7 @@ def analyze_stream():
 
             batch_results = []
             for ticker, info in batch:
+                meta = ticker_meta.get(ticker, {})
                 try:
                     # Step 1: Search news from all available sources
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'뉴스 기사 검색 중... ({ticker})'})}\n\n"
