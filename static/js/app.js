@@ -862,8 +862,8 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("dateInput");
-        const dateStr = dateInput ? dateInput.value : new Date().toISOString().split("T")[0];
+        const dateInput = document.getElementById("analysisDate");
+        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
@@ -963,8 +963,8 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("dateInput");
-        const dateStr = dateInput ? dateInput.value : new Date().toISOString().split("T")[0];
+        const dateInput = document.getElementById("analysisDate");
+        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
