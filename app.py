@@ -1416,6 +1416,24 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
         # Check if target_date data exists
         if target_date not in date_close:
+            # Check if meta.regularMarketPrice can fill the gap (market was trading but quote not timestamped yet)
+            market_price = meta.get("regularMarketPrice")
+            market_time = meta.get("regularMarketTime")
+            if market_price and market_time:
+                # Check if regularMarketTime is from target_date (KST)
+                market_dt_utc = datetime.utcfromtimestamp(market_time)
+                market_date = market_dt_utc.date()
+                # If market date matches target_date, use regularMarketPrice as today's close
+                if market_date == target_date and sorted_dates:
+                    prev_close = date_close[sorted_dates[-1]]
+                    last_close = float(market_price)
+                    change_pct = ((last_close - prev_close) / prev_close) * 100
+                    return {
+                        "name": name,
+                        "change_pct": round(float(change_pct), 2),
+                        "date": str(target_date),
+                        "is_closed": False,
+                    }
             # Target date data not available → market is closed
             return {
                 "name": name,
