@@ -1397,9 +1397,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const indices = data.indices || [];
         marketIndicesGrid.innerHTML = indices.map(idx => {
             const chg = idx.change_pct || 0;
-            const cls = idx.error ? "error" : chg > 0 ? "positive" : chg < 0 ? "negative" : "neutral";
+            const cls = idx.error ? "error" : idx.is_closed ? "neutral" : chg > 0 ? "positive" : chg < 0 ? "negative" : "neutral";
             const sign = chg > 0 ? "+" : "";
-            const changeText = idx.error ? "오류" : `${sign}${chg.toFixed(2)}%`;
+            let changeText;
+            if (idx.error) {
+                changeText = "오류";
+            } else if (idx.is_closed) {
+                changeText = "휴장";
+            } else {
+                changeText = `${sign}${chg.toFixed(2)}%`;
+            }
             return `<div class="market-index-item ${cls}">
                 <span class="idx-region">${escapeHtml(idx.region)}</span>
                 <span class="idx-name">${escapeHtml(idx.name)}</span>
