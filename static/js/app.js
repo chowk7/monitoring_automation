@@ -925,19 +925,16 @@ document.addEventListener("DOMContentLoaded", () => {
         // 개별회사 section
         if (currentResults.length > 0) {
             lines.push("<b><u>개별회사</u></b>");
-            lines.push('<table style="border-collapse:collapse; border:none; font-family:\'맑은고딕\',Malgun Gothic,Arial,sans-serif; font-size:10.5pt; width:100%;">');
+            const tableRows = [];
             for (const r of currentResults) {
                 const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
                 const chgVal = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
                 const chgHtml = r.change_pct < 0
                     ? `<span style="color:rgb(255,0,0)">${chgVal}</span>`
                     : `<span style="color:rgb(0,0,255)">${chgVal}</span>`;
-                lines.push(`<tr>`);
-                lines.push(`<td style="border:none; vertical-align:top; white-space:nowrap; padding:2px 8px 2px 0; color:#333;">- ${escapeHtml(r.name)} (${chgHtml}) :</td>`);
-                lines.push(`<td style="border:none; vertical-align:top; padding:2px 0; color:#333;">${analysis}</td>`);
-                lines.push(`</tr>`);
+                tableRows.push(`<tr><td style="border:none; vertical-align:top; white-space:nowrap; padding:2px 8px 2px 0; color:#333;">- ${escapeHtml(r.name)} (${chgHtml}) :</td><td style="border:none; vertical-align:top; padding:2px 0; color:#333;">${analysis}</td></tr>`);
             }
-            lines.push("</table>");
+            lines.push('<table style="border-collapse:collapse; border:none; font-family:\'맑은고딕\',Malgun Gothic,Arial,sans-serif; font-size:10.5pt; width:100%;">' + tableRows.join("") + "</table>");
         }
 
         return lines.join("<br>");
