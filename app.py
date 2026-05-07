@@ -1345,22 +1345,19 @@ def ticker_tz_hours(ticker):
 def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
     """Fetch a single ticker's data from Yahoo Finance API.
 
-    tz_hours: UTC offset of the exchange (e.g. 9 for KST/JST, 8 for CST/HKT).
-    Bar dates are evaluated in local time so 3/16 always means 3/16 locally.
-    If None, auto-detected from ticker suffix.
+    Simplified: Only fetch target_date and previous day data, no timezone conversion.
+    If target_date data is missing → market is closed (holiday/weekend).
     """
-    if tz_hours is None:
-        tz_hours = ticker_tz_hours(ticker_symbol)
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
 
         if target_date:
-            # Fetch a 14-day window ending at target_date+2 to account for weekends/holidays
+            # Fetch: (target - 1 day) ~ (target + 1 day) — just 2 days
             period1_dt = datetime.combine(
-                target_date - timedelta(days=14), datetime.min.time()
+                target_date - timedelta(days=1), datetime.min.time()
             ).replace(tzinfo=timezone.utc)
             period2_dt = datetime.combine(
-                target_date + timedelta(days=2), datetime.min.time()
+                target_date + timedelta(days=1), datetime.min.time()
             ).replace(tzinfo=timezone.utc)
             params = {
                 "period1": int(period1_dt.timestamp()),
@@ -1385,56 +1382,67 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         closes = result["indicators"]["quote"][0]["close"]
         timestamps = result["timestamp"]
 
-        valid = [(ts, c) for ts, c in zip(timestamps, closes) if c is not None]
+        # Build (date, close) pairs from UTC timestamps, no timezone conversion
+        # Dates are in UTC, but we treat them as market calendar dates
+        date_close = {}
+        for ts, c in zip(timestamps, closes):
+            if c is not None:
+                # Use UTC date directly as market date
+                dt = datetime.utcfromtimestamp(ts)
+                date_close[dt.date()] = c
 
-        # Deduplicate: keep the last bar per local market date (using timezone offset)
-        market_tz = timezone(timedelta(hours=tz_hours))
-        seen: dict = {}
-        for ts, c in valid:
-            local_date = datetime.fromtimestamp(ts, market_tz).date()
-            seen[local_date] = (ts, c)
-        valid = sorted(seen.values())
-
-        if target_date:
-            # Filter using local market date, not UTC
-            market_tz = timezone(timedelta(hours=tz_hours))
-            filtered = []
-            for ts, c in valid:
-                local_date = datetime.fromtimestamp(ts, market_tz).date()
-                if local_date <= target_date:
-                    filtered.append((ts, c))
-            if len(filtered) >= 2:
-                valid = filtered
-
-        if len(valid) < 2:
-            return {
-                "error": f"Insufficient data (rows={len(valid)})",
-                "change_pct": 0,
-                "name": ticker_symbol,
-            }
-
-        prev_close = valid[-2][1]
-        last_close = valid[-1][1]
-        change_pct = ((last_close - prev_close) / prev_close) * 100
-        last_date = datetime.fromtimestamp(valid[-1][0], market_tz).date()
+        sorted_dates = sorted(date_close.keys())
         name = meta.get("shortName", meta.get("longName", ticker_symbol))
 
-        # Check if market was closed on target_date:
-        # For stocks (T+1 settlement): last_date < target_date means closed
-        # For indices: need at least 2 days difference to avoid false positives
-        #   (1 day difference = today's data not recorded yet, not closed)
-        #   (2+ days difference = weekend or holiday)
-        is_closed = False
-        if target_date is not None and last_date < target_date:
-            days_diff = (target_date - last_date).days
-            if days_diff >= 2:
-                is_closed = True  # Weekend or holiday
+        if not target_date:
+            # No target date → return latest data
+            if len(sorted_dates) < 2:
+                return {
+                    "error": f"Insufficient data",
+                    "change_pct": 0,
+                    "name": name,
+                }
+            prev_close = date_close[sorted_dates[-2]]
+            last_close = date_close[sorted_dates[-1]]
+            change_pct = ((last_close - prev_close) / prev_close) * 100
+            return {
+                "name": name,
+                "change_pct": round(float(change_pct), 2),
+                "date": str(sorted_dates[-1]),
+                "is_closed": False,
+            }
+
+        # Check if target_date data exists
+        if target_date not in date_close:
+            # Target date data not available → market is closed
+            return {
+                "name": name,
+                "change_pct": 0,
+                "date": str(sorted_dates[-1]) if sorted_dates else "",
+                "is_closed": True,
+            }
+
+        # Find previous day data
+        target_idx = sorted_dates.index(target_date)
+        if target_idx == 0 or len(sorted_dates) < 2:
+            return {
+                "name": name,
+                "change_pct": 0,
+                "date": str(target_date),
+                "is_closed": False,
+                "error": "No previous day data",
+            }
+
+        prev_date = sorted_dates[target_idx - 1]
+        prev_close = date_close[prev_date]
+        last_close = date_close[target_date]
+        change_pct = ((last_close - prev_close) / prev_close) * 100
 
         return {
             "name": name,
             "change_pct": round(float(change_pct), 2),
-            "date": str(last_date),
-            "is_closed": is_closed,
+            "date": str(target_date),
+            "is_closed": False,
         }
     except Exception as e:
         return {
@@ -1445,28 +1453,24 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
 
 
 def fetch_all_market_indices(target_date=None):
-    """Fetch all global market indices data."""
+    """Fetch all global market indices data.
+    
+    Simplified: Uses fetch_single_ticker which handles:
+    - 2-day API range (target-1, target+1)
+    - No timezone conversion
+    - is_closed if target_date data missing
+    """
     results = []
     for idx in MARKET_INDICES:
-        data = fetch_single_ticker(idx["ticker"], target_date=target_date, tz_hours=idx.get("tz_hours", 0))
-        returned_date = data.get("date", "")
-        # 휴장 감지: 2일 이상 차이 나면 휴장 (1일 차이는 오늘 데이터 미기록일 수 있음)
-        is_closed = data.get("is_closed", False)
-        if target_date and returned_date:
-            try:
-                returned_date_obj = datetime.fromisoformat(returned_date).date()
-                days_diff = (target_date - returned_date_obj).days
-                is_closed = days_diff >= 2
-            except ValueError:
-                pass
+        data = fetch_single_ticker(idx["ticker"], target_date=target_date)
         results.append({
             "ticker": idx["ticker"],
             "name": idx["name"],
             "region": idx["region"],
             "change_pct": data.get("change_pct", 0),
-            "date": returned_date,
+            "date": data.get("date", ""),
             "error": data.get("error", ""),
-            "is_closed": is_closed,
+            "is_closed": data.get("is_closed", False),
         })
     return results
 
