@@ -951,16 +951,18 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
                     + "</p>"
                 )
 
-    # Build 개별회사 section
-    company_lines = ""
+    # Build 개별회사 section (2열 테이블 형식)
+    company_rows = ""
     for r in results:
         analysis_text = r.get("analysis", "").replace("\n", " ").strip()
         chg_html = fmt_chg(r["change_pct"], 1)
-        company_lines += (
-            f'<p style="{font_style}margin:2px 0;">'
-            f'- {r["name"]} ({chg_html}) : {analysis_text}'
-            f'</p>'
+        company_rows += (
+            f'<tr>'
+            f'<td style="border:none;vertical-align:top;white-space:nowrap;padding:2px 8px 2px 0;color:#333;">- {r["name"]} ({chg_html}) :</td>'
+            f'<td style="border:none;vertical-align:top;padding:2px 0;color:#333;">{analysis_text}</td>'
+            f'</tr>'
         )
+    company_table = f'<table style="border-collapse:collapse;border:none;{font_style}width:100%;">{company_rows}</table>' if company_rows else ""
 
     market_section = ""
     if market_lines:
@@ -978,7 +980,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
 <p style="{font_style}margin:4px 0;">{date_label}일 종가기준 모니터링 업체 현황 송부드립니다.</p>
 <br>
 {market_section}<p style="{font_style}margin:6px 0;"><b>개별회사</b></p>
-{company_lines}
+{company_table}
 </body>
 </html>"""
     return body
