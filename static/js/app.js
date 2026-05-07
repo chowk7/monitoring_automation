@@ -925,15 +925,19 @@ document.addEventListener("DOMContentLoaded", () => {
         // 개별회사 section
         if (currentResults.length > 0) {
             lines.push("<b><u>개별회사</u></b>");
+            lines.push('<table style="border-collapse:collapse; border:none; font-family:\'맑은고딕\',Malgun Gothic,Arial,sans-serif; font-size:10.5pt; width:100%;">');
             for (const r of currentResults) {
                 const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
-                // 개별회사 등락률은 소수점 1자리 + 색상 적용
                 const chgVal = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
                 const chgHtml = r.change_pct < 0
                     ? `<span style="color:rgb(255,0,0)">${chgVal}</span>`
                     : `<span style="color:rgb(0,0,255)">${chgVal}</span>`;
-                lines.push(`- ${escapeHtml(r.name)} (${chgHtml}): ${analysis}`);
+                lines.push(`<tr>`);
+                lines.push(`<td style="border:none; vertical-align:top; white-space:nowrap; padding:2px 8px 2px 0; color:#333;">- ${escapeHtml(r.name)} (${chgHtml}) :</td>`);
+                lines.push(`<td style="border:none; vertical-align:top; padding:2px 0; color:#333;">${analysis}</td>`);
+                lines.push(`</tr>`);
             }
+            lines.push("</table>");
         }
 
         return lines.join("<br>");
