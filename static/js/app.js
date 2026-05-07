@@ -927,9 +927,12 @@ document.addEventListener("DOMContentLoaded", () => {
             lines.push("<b><u>개별회사</u></b>");
             for (const r of currentResults) {
                 const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
-                // 개별회사 등락률은 소수점 1자리
-                const chg1 = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
-                lines.push(`- ${escapeHtml(r.name)} (${chg1}): ${analysis}`);
+                // 개별회사 등락률은 소수점 1자리 + 색상 적용
+                const chgVal = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
+                const chgHtml = r.change_pct < 0
+                    ? `<span style="color:rgb(255,0,0)">${chgVal}</span>`
+                    : `<span style="color:rgb(0,0,255)">${chgVal}</span>`;
+                lines.push(`- ${escapeHtml(r.name)} (${chgHtml}): ${analysis}`);
             }
         }
 
