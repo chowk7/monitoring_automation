@@ -2076,7 +2076,7 @@ def run_scheduled_analysis(target_date=None):
     try:
         logger.info("Scheduled analysis started")
         if target_date is None:
-            target_date = get_kst_today()
+            target_date = get_kst_yesterday()
 
         settings = load_settings()
         model = settings.get("gemini_model", DEFAULT_GEMINI_MODEL)
