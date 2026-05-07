@@ -967,7 +967,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
     market_section = ""
     if market_lines:
         market_section = (
-            f'<p style="{font_style}margin:6px 0;"><b>시\u00a0\u00a0장</b></p>'
+            f'<p style="{font_style}margin:6px 0;"><b><u>시\u00a0\u00a0장</u></b></p>'
             + market_lines
             + '<br>'
         )
@@ -979,7 +979,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
 <p style="{font_style}margin:4px 0;">안녕하십니까,</p>
 <p style="{font_style}margin:4px 0;">{date_label}일 종가기준 모니터링 업체 현황 송부드립니다.</p>
 <br>
-{market_section}<p style="{font_style}margin:6px 0;"><b>개별회사</b></p>
+{market_section}<p style="{font_style}margin:6px 0;"><b><u>개별회사</u></b></p>
 {company_table}
 </body>
 </html>"""
