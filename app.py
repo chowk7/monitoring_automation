@@ -1352,9 +1352,9 @@ def fetch_single_ticker(ticker_symbol, target_date=None, tz_hours=None):
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
 
         if target_date:
-            # Fetch: (target - 1 day) ~ (target + 1 day) — just 2 days
+            # Fetch: (target - 3 days) ~ (target + 1 day) — wider range to get 2 trading days even with holidays
             period1_dt = datetime.combine(
-                target_date - timedelta(days=1), datetime.min.time()
+                target_date - timedelta(days=3), datetime.min.time()
             ).replace(tzinfo=timezone.utc)
             period2_dt = datetime.combine(
                 target_date + timedelta(days=1), datetime.min.time()
