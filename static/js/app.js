@@ -76,6 +76,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let defaultPrompts = { with_articles: "", without_articles: "" };
     // Active EventSource (for stop functionality)
     let currentEventSource = null;
+    let currentTickers = [];
+    let analysisRunId = 0;
+
+    const CLIENT_ANALYSIS_BATCH_SIZE = 25;
 
     // ─── Init ─────────────────────────────────────────────────────────────
 
@@ -635,6 +639,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function stopAnalysis() {
+        analysisRunId += 1;
         if (currentEventSource) {
             currentEventSource.close();
             currentEventSource = null;
@@ -1213,6 +1218,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function renderTickers(tickers) {
+        currentTickers = Array.isArray(tickers) ? tickers.slice() : [];
         tickerCount.textContent = tickers.length;
         analyzeBtn.disabled = tickers.length === 0;
 
@@ -1272,7 +1278,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ─── Analysis Functions ───────────────────────────────────────────────
 
-    function runAnalysis() {
+    async function runAnalysis() {
         hideError();
         resultsSection.style.display = "none";
         loadingSection.style.display = "block";
@@ -1290,105 +1296,216 @@ document.addEventListener("DOMContentLoaded", () => {
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
         const customQuery = "";
+        const runId = ++analysisRunId;
+        const tickers = currentTickers.map(item => item.ticker).filter(Boolean);
+        const tickerBatches = chunkTickers(tickers, CLIENT_ANALYSIS_BATCH_SIZE);
+        const allStocksAggregate = {};
+        let lastDoneMessage = "";
 
-        // Use SSE for streaming
-        let url = `/api/analyze/stream?model=${encodeURIComponent(selectedModel)}&date=${encodeURIComponent(dateStr)}`;
-        if (customQuery) url += `&custom_query=${encodeURIComponent(customQuery)}`;
-        const eventSource = new EventSource(url);
-        currentEventSource = eventSource;
+        try {
+            for (let batchIndex = 0; batchIndex < tickerBatches.length; batchIndex += 1) {
+                if (analysisRunId !== runId) return;
 
-        eventSource.onmessage = function(event) {
-            try {
-                const data = JSON.parse(event.data);
+                const batchTickers = tickerBatches[batchIndex];
+                const skipMarket = batchIndex > 0;
+                const batchDoneMessage = await streamAnalysisBatch({
+                    batchTickers,
+                    batchIndex,
+                    totalBatches: tickerBatches.length,
+                    selectedModel,
+                    dateStr,
+                    customQuery,
+                    skipMarket,
+                    onMessage: (data) => {
+                        if (analysisRunId !== runId) return;
 
-                switch (data.type) {
-                    case "progress":
-                        loadingText.textContent = data.message;
-                        // Update progress bar
-                        if (data.message.includes("글로벌 지수")) {
-                            progressFill.style.width = "10%";
-                        } else if (data.message.includes("주가 수집")) {
-                            progressFill.style.width = "25%";
-                        } else if (data.message.includes("분석 시작")) {
-                            progressFill.style.width = "40%";
-                        } else if (data.message.includes("뉴스 기사 검색")) {
-                            progressFill.style.width = "55%";
-                        } else if (data.message.includes("Gemini 분석")) {
-                            progressFill.style.width = "75%";
-                        } else if (data.message.includes("분석 중")) {
-                            const match = data.message.match(/\((\d+)\/(\d+)\)/);
-                            if (match) {
-                                const current = parseInt(match[1]);
-                                const total = parseInt(match[2]);
-                                const pct = 40 + (current / total) * 55;
-                                progressFill.style.width = pct + "%";
-                            }
+                        switch (data.type) {
+                            case "progress":
+                                loadingText.textContent = data.message;
+                                progressFill.style.width = `${computeOverallProgress(data.message, batchIndex, tickerBatches.length)}%`;
+                                break;
+
+                            case "market_indices":
+                                currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date };
+                                resultsSection.style.display = "block";
+                                renderMarketIndices(data);
+                                break;
+
+                            case "stocks":
+                                resultsSection.style.display = "block";
+                                Object.assign(allStocksAggregate, data.all_stocks || {});
+                                renderCategoryStats(computeCategoryStats(allStocksAggregate));
+                                renderAllStocksOverview(allStocksAggregate);
+                                break;
+
+                            case "results":
+                                currentResults = currentResults.concat(data.results || []);
+                                appendAnalysisResults(data.results || []);
+                                break;
+
+                            case "done":
+                                lastDoneMessage = data.message || lastDoneMessage;
+                                break;
                         }
-                        break;
+                    },
+                });
 
-                    case "market_indices":
-                        currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date };
-                        resultsSection.style.display = "block";
-                        renderMarketIndices(data);
-                        break;
-
-                    case "stocks":
-                        resultsSection.style.display = "block";
-                        if (data.category_stats) renderCategoryStats(data.category_stats);
-                        renderAllStocksOverview(data.all_stocks);
-                        break;
-
-                    case "results":
-                        currentResults = currentResults.concat(data.results);
-                        appendAnalysisResults(data.results);
-                        break;
-
-                    case "done":
-                        eventSource.close();
-                        currentEventSource = null;
-                        progressFill.style.width = "100%";
-                        loadingText.textContent = "완료!";
-
-                        setTimeout(() => {
-                            loadingSection.style.display = "none";
-                            progressFill.style.width = "0%";
-                            analyzeBtn.disabled = false;
-                            if (stopBtn) stopBtn.style.display = "none";
-
-                            // Auto-send email and show button if results exist
-                            // Show email send button (don't auto-send, McAfee blocks POST)
-                            if (sendEmailBtn && currentResults.length > 0) {
-                                sendEmailBtn.style.display = "inline-flex";
-                            }
-
-                            // Update email copy preview
-                            updateEmailCopyPreview();
-
-                            if (currentResults.length === 0 && data.message) {
-                                analysisResults.innerHTML = `
-                                    <div class="no-filter-message">
-                                        <p>${escapeHtml(data.message)}</p>
-                                        <p style="margin-top:8px"><strong>Tip:</strong> 변동성이 큰 종목을 추가하거나 날짜를 변경해보세요.</p>
-                                    </div>
-                                `;
-                            }
-                        }, 500);
-                        break;
+                if (batchDoneMessage) {
+                    lastDoneMessage = batchDoneMessage;
                 }
-            } catch (err) {
-                console.error("Error parsing SSE data:", err);
             }
-        };
 
-        eventSource.onerror = function(err) {
+            if (analysisRunId !== runId) return;
+
+            progressFill.style.width = "100%";
+            loadingText.textContent = "완료!";
+
+            setTimeout(() => {
+                if (analysisRunId !== runId) return;
+
+                loadingSection.style.display = "none";
+                progressFill.style.width = "0%";
+                analyzeBtn.disabled = false;
+                if (stopBtn) stopBtn.style.display = "none";
+
+                if (sendEmailBtn && currentResults.length > 0) {
+                    sendEmailBtn.style.display = "inline-flex";
+                }
+
+                updateEmailCopyPreview();
+
+                if (currentResults.length === 0 && lastDoneMessage) {
+                    analysisResults.innerHTML = `
+                        <div class="no-filter-message">
+                            <p>${escapeHtml(lastDoneMessage)}</p>
+                            <p style="margin-top:8px"><strong>Tip:</strong> 변동성이 큰 종목을 추가하거나 날짜를 변경해보세요.</p>
+                        </div>
+                    `;
+                }
+            }, 500);
+        } catch (err) {
+            if (analysisRunId !== runId) return;
+
             console.error("SSE error:", err);
-            eventSource.close();
-            currentEventSource = null;
+            if (currentEventSource) {
+                currentEventSource.close();
+                currentEventSource = null;
+            }
             loadingSection.style.display = "none";
             analyzeBtn.disabled = false;
             if (stopBtn) stopBtn.style.display = "none";
             showError("분석 중 오류가 발생했습니다. 다시 시도해주세요.");
-        };
+        }
+    }
+
+    function chunkTickers(tickers, batchSize) {
+        const chunks = [];
+        for (let i = 0; i < tickers.length; i += batchSize) {
+            chunks.push(tickers.slice(i, i + batchSize));
+        }
+        return chunks;
+    }
+
+    function streamAnalysisBatch({ batchTickers, batchIndex, totalBatches, selectedModel, dateStr, customQuery, skipMarket, onMessage }) {
+        return new Promise((resolve, reject) => {
+            const params = new URLSearchParams({
+                model: selectedModel,
+                date: dateStr,
+                tickers: batchTickers.join(","),
+            });
+            if (customQuery) params.set("custom_query", customQuery);
+            if (skipMarket) params.set("skip_market", "1");
+
+            const eventSource = new EventSource(`/api/analyze/stream?${params.toString()}`);
+            currentEventSource = eventSource;
+            let resolved = false;
+
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    onMessage(data);
+
+                    if (data.type === "done") {
+                        resolved = true;
+                        eventSource.close();
+                        if (currentEventSource === eventSource) {
+                            currentEventSource = null;
+                        }
+                        progressFill.style.width = `${((batchIndex + 1) / totalBatches) * 100}%`;
+                        resolve(data.message || "");
+                    }
+                } catch (err) {
+                    console.error("Error parsing SSE data:", err);
+                }
+            };
+
+            eventSource.onerror = function(err) {
+                eventSource.close();
+                if (currentEventSource === eventSource) {
+                    currentEventSource = null;
+                }
+                if (!resolved) {
+                    reject(err);
+                }
+            };
+        });
+    }
+
+    function computeOverallProgress(message, batchIndex, totalBatches) {
+        let batchProgress = 0.1;
+
+        if (message.includes("글로벌 지수 수집")) {
+            batchProgress = 0.08;
+        } else if (message.includes("글로벌 지수 뉴스 검색")) {
+            batchProgress = 0.12;
+        } else if (message.includes("글로벌 지수 Gemini 분석")) {
+            batchProgress = 0.18;
+        } else if (message.includes("주가 수집")) {
+            const match = message.match(/\((\d+)\/(\d+)\)/);
+            if (match) {
+                batchProgress = 0.2 + (parseInt(match[1], 10) / parseInt(match[2], 10)) * 0.2;
+            } else {
+                batchProgress = 0.3;
+            }
+        } else if (message.includes("분석 시작")) {
+            batchProgress = 0.45;
+        } else if (message.includes("뉴스 기사 검색")) {
+            batchProgress = 0.65;
+        } else if (message.includes("Gemini 분석")) {
+            batchProgress = 0.8;
+        } else if (message.includes("분석 중")) {
+            const match = message.match(/\((\d+)\/(\d+)\)/);
+            if (match) {
+                batchProgress = 0.45 + (parseInt(match[1], 10) / parseInt(match[2], 10)) * 0.5;
+            } else {
+                batchProgress = 0.7;
+            }
+        }
+
+        return Math.min(99, ((batchIndex + batchProgress) / totalBatches) * 100);
+    }
+
+    function computeCategoryStats(allStocks) {
+        const stats = {};
+
+        Object.values(allStocks || {}).forEach((info) => {
+            const category = info.category || "기타";
+            if (!stats[category]) {
+                stats[category] = { total: 0, count: 0 };
+            }
+            if (!info.error) {
+                stats[category].total += info.change_pct || 0;
+                stats[category].count += 1;
+            }
+        });
+
+        Object.keys(stats).forEach((category) => {
+            const entry = stats[category];
+            entry.avg = entry.count ? entry.total / entry.count : 0;
+            delete entry.total;
+        });
+
+        return stats;
     }
 
     function renderMarketIndices(data) {
