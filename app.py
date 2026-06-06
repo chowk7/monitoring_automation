@@ -1110,8 +1110,24 @@ def analyze_stream():
     ticker_objects = load_tickers_from_csv()
     if not ticker_objects:
         return jsonify({"error": "No tickers saved."}), 400
+
+    requested_tickers = [
+        ticker.strip().upper()
+        for ticker in request.args.get("tickers", "").split(",")
+        if ticker.strip()
+    ]
+    if requested_tickers:
+        requested_ticker_set = set(requested_tickers)
+        ticker_objects = [
+            ticker_obj for ticker_obj in ticker_objects
+            if ticker_obj["ticker"].upper() in requested_ticker_set
+        ]
+        if not ticker_objects:
+            return jsonify({"error": "Requested tickers not found."}), 400
+
     tickers = [t["ticker"] for t in ticker_objects]
     ticker_meta = {t["ticker"]: t for t in ticker_objects}
+    skip_market = request.args.get("skip_market", "").lower() in {"1", "true", "yes"}
 
     settings = load_settings()
     model = request.args.get("model", settings.get("gemini_model", DEFAULT_GEMINI_MODEL))
@@ -1141,29 +1157,30 @@ def analyze_stream():
         log_memory("STREAM START")
 
         # Phase 0: Fetch global market indices + news + Gemini analysis
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
-        indices_data = fetch_all_market_indices(target_date)
-        trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
-        # News date uses KST (user-selected date) — the earliest timezone, so
-        # articles for all regions are most likely to be available.
-        news_date_kst = str(target_date)
+        if not skip_market:
+            yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 수집 중...'})}\n\n"
+            indices_data = fetch_all_market_indices(target_date)
+            trade_date_for_market = next((idx["date"] for idx in indices_data if idx.get("date")), str(target_date))
+            # News date uses KST (user-selected date) — the earliest timezone, so
+            # articles for all regions are most likely to be available.
+            news_date_kst = str(target_date)
 
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
-        articles_by_region = {}
-        for region in MARKET_NEWS_REGIONS:
-            arts = search_market_news_for_region(region, news_date_kst, target_date)
-            if arts:
-                articles_by_region[region] = arts
+            yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 뉴스 검색 중...'})}\n\n"
+            articles_by_region = {}
+            for region in MARKET_NEWS_REGIONS:
+                arts = search_market_news_for_region(region, news_date_kst, target_date)
+                if arts:
+                    articles_by_region[region] = arts
 
-        yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 Gemini 분석 중...'})}\n\n"
-        market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
+            yield f"data: {json.dumps({'type': 'progress', 'message': '글로벌 지수 Gemini 분석 중...'})}\n\n"
+            market_analysis = analyze_market_indices_with_gemini(indices_data, articles_by_region, model=model)
 
-        articles_by_region_slim = {
-            region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
-            for region, arts in articles_by_region.items()
-        }
-        yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
-        gc.collect()
+            articles_by_region_slim = {
+                region: [{"title": a["title"], "link": a.get("link", ""), "source": a.get("source", ""), "date": a.get("date", "")} for a in arts[:5]]
+                for region, arts in articles_by_region.items()
+            }
+            yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
+            gc.collect()
 
         # Phase 1: Fetch all stock data in batches
         all_stocks_slim = {}
