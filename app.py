@@ -97,32 +97,16 @@ def gcs_upload(src_path, blob_name):
 
 
 def startup_sync_from_gcs():
-    """On app start, pull settings.json and tickers.csv from GCS (if configured).
-    If GCS tickers differ from DEFAULT_TICKERS, push DEFAULT_TICKERS to GCS.
+    """On app start, pull settings.json and tickers.csv from GCS when configured.
+
+    Never overwrite a user's saved ticker list just because it differs from
+    DEFAULT_TICKERS. DEFAULT_TICKERS are only a first-run bootstrap.
     """
     if not GCS_BUCKET_NAME:
         return
     logger.info(f"GCS: syncing config from bucket '{GCS_BUCKET_NAME}'...")
     gcs_download("settings.json", SETTINGS_FILE)
     gcs_download("tickers.csv", TICKERS_CSV_FILE)
-
-    # If the GCS ticker set differs from DEFAULT_TICKERS, update GCS automatically.
-    # This keeps GCS in sync whenever DEFAULT_TICKERS is changed in code.
-    if os.path.exists(TICKERS_CSV_FILE):
-        gcs_ticker_set = set()
-        try:
-            import csv as _csv
-            with open(TICKERS_CSV_FILE, "r", newline="", encoding="utf-8") as _f:
-                for row in _csv.reader(_f):
-                    if row and row[0].strip():
-                        gcs_ticker_set.add(row[0].strip().upper())
-        except Exception:
-            pass
-        default_ticker_set = {t["ticker"].upper() for t in DEFAULT_TICKERS}
-        if gcs_ticker_set != default_ticker_set:
-            save_tickers_to_csv(DEFAULT_TICKERS)
-            if gcs_upload(TICKERS_CSV_FILE, "tickers.csv"):
-                logger.info(f"GCS: tickers.csv updated ({len(DEFAULT_TICKERS)} tickers)")
 
     logger.info("GCS: startup sync complete")
 
@@ -399,6 +383,8 @@ def save_settings(settings):
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, ensure_ascii=False, indent=2)
+        if GCS_BUCKET_NAME:
+            gcs_upload(SETTINGS_FILE, "settings.json")
     except Exception as e:
         logger.error(f"Error writing settings: {e}")
 
@@ -487,20 +473,37 @@ def load_tickers_from_csv():
 
 def save_tickers_to_csv(ticker_list):
     """Save list of ticker dicts ({ticker, category, name}) to CSV file."""
-    try:
-        with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            for item in ticker_list:
-                if isinstance(item, dict):
-                    writer.writerow([
-                        item.get("ticker", ""),
-                        item.get("category", ""),
-                        item.get("name", ""),
-                    ])
-                else:
-                    writer.writerow([str(item), "", ""])
-    except Exception as e:
-        logger.error(f"Error writing CSV: {e}")
+    with open(TICKERS_CSV_FILE, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        for item in ticker_list:
+            if isinstance(item, dict):
+                writer.writerow([
+                    item.get("ticker", ""),
+                    item.get("category", ""),
+                    item.get("name", ""),
+                ])
+            else:
+                writer.writerow([str(item), "", ""])
+    if GCS_BUCKET_NAME:
+        gcs_upload(TICKERS_CSV_FILE, "tickers.csv")
+
+
+def _normalize_ticker_item(item):
+    return {
+        "ticker": (item.get("ticker", "") or "").strip().upper(),
+        "category": (item.get("category", "") or "").strip(),
+        "name": (item.get("name", "") or "").strip(),
+    }
+
+
+def persist_and_reload_tickers(ticker_list):
+    """Persist tickers and verify the reloaded server-side list matches."""
+    normalized_expected = [_normalize_ticker_item(item) for item in ticker_list]
+    save_tickers_to_csv(normalized_expected)
+    reloaded = [_normalize_ticker_item(item) for item in load_tickers_from_csv()]
+    if reloaded != normalized_expected:
+        raise IOError("Ticker persistence verification failed")
+    return reloaded
 
 
 # ─── GCS Startup Sync ─────────────────────────────────────────────────────────
@@ -536,8 +539,12 @@ def add_ticker():
         return jsonify({"error": f"{ticker} is already added"}), 400
 
     ticker_list.append({"ticker": ticker, "category": category, "name": name})
-    save_tickers_to_csv(ticker_list)
-    return jsonify({"tickers": ticker_list})
+    try:
+        saved_tickers = persist_and_reload_tickers(ticker_list)
+    except Exception as e:
+        logger.error(f"Failed to persist ticker {ticker}: {e}")
+        return jsonify({"error": "Ticker 저장에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers})
 
 
 @app.route("/api/tickers/<ticker>", methods=["DELETE"])
@@ -545,8 +552,12 @@ def delete_ticker(ticker):
     ticker = ticker.upper()
     ticker_list = load_tickers_from_csv()
     ticker_list = [t for t in ticker_list if t["ticker"] != ticker]
-    save_tickers_to_csv(ticker_list)
-    return jsonify({"tickers": ticker_list})
+    try:
+        saved_tickers = persist_and_reload_tickers(ticker_list)
+    except Exception as e:
+        logger.error(f"Failed to delete ticker {ticker}: {e}")
+        return jsonify({"error": "Ticker 삭제에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers})
 
 
 @app.route("/api/tickers/bulk", methods=["POST"])
@@ -575,22 +586,34 @@ def bulk_add_tickers():
             existing.add(t)
             added.append(t)
 
-    save_tickers_to_csv(ticker_list)
-    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
+    try:
+        saved_tickers = persist_and_reload_tickers(ticker_list)
+    except Exception as e:
+        logger.error(f"Failed to persist bulk tickers: {e}")
+        return jsonify({"error": "Ticker 일괄 저장에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers, "added": added, "added_count": len(added)})
 
 
 @app.route("/api/tickers/clear", methods=["DELETE"])
 def clear_tickers():
     """Clear all tickers."""
-    save_tickers_to_csv([])
-    return jsonify({"tickers": [], "message": "All tickers cleared"})
+    try:
+        saved_tickers = persist_and_reload_tickers([])
+    except Exception as e:
+        logger.error(f"Failed to clear tickers: {e}")
+        return jsonify({"error": "전체 삭제에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers, "message": "All tickers cleared"})
 
 
 @app.route("/api/tickers/reset-defaults", methods=["POST"])
 def reset_tickers_to_defaults():
     """Reset tickers to the built-in default list."""
-    save_tickers_to_csv(DEFAULT_TICKERS)
-    return jsonify({"tickers": list(DEFAULT_TICKERS), "count": len(DEFAULT_TICKERS)})
+    try:
+        saved_tickers = persist_and_reload_tickers(DEFAULT_TICKERS)
+    except Exception as e:
+        logger.error(f"Failed to reset default tickers: {e}")
+        return jsonify({"error": "디폴트 종목 초기화에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers, "count": len(saved_tickers)})
 
 
 @app.route("/api/tickers/upload", methods=["POST"])
@@ -658,8 +681,12 @@ def upload_tickers_csv():
             existing.add(item["ticker"])
             added.append(item["ticker"])
 
-    save_tickers_to_csv(ticker_list)
-    return jsonify({"tickers": ticker_list, "added": added, "added_count": len(added)})
+    try:
+        saved_tickers = persist_and_reload_tickers(ticker_list)
+    except Exception as e:
+        logger.error(f"Failed to persist uploaded tickers CSV: {e}")
+        return jsonify({"error": "CSV 종목 저장에 실패했습니다"}), 500
+    return jsonify({"tickers": saved_tickers, "added": added, "added_count": len(added)})
 
 
 # ─── Settings Routes ──────────────────────────────────────────────────────────
