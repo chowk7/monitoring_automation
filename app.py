@@ -856,6 +856,7 @@ def send_email_report():
     market_data = data.get("market_data", None)
     all_stocks = data.get("all_stocks", None)
     category_stats = data.get("category_stats", None)
+    current_tickers = data.get("current_tickers", None)
 
     if not results:
         return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
@@ -872,7 +873,14 @@ def send_email_report():
     today = datetime.now(KST).strftime("%Y-%m-%d")
     m, d = today.split("-")[1], today.split("-")[2]
     subject = f"[{int(m)}/{int(d)}일 종가기준] 모니터링 업체 현황"
-    html_body = build_email_html(results, today, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
+    html_body = build_email_html(
+        results,
+        today,
+        market_data=market_data,
+        all_stocks=all_stocks,
+        category_stats=category_stats,
+        ticker_objects=current_tickers,
+    )
 
     try:
         msg = MIMEMultipart("alternative")
@@ -903,11 +911,47 @@ def get_email_preview():
     results = data.get("results", [])
     market_data = data.get("market_data", None)
     date_str = data.get("date", datetime.now(KST).strftime("%Y-%m-%d"))
-    text = build_email_text(results, date_str, market_data=market_data)
+    current_tickers = data.get("current_tickers", None)
+    text = build_email_text(results, date_str, market_data=market_data, ticker_objects=current_tickers)
     return jsonify({"text": text})
 
 
-def build_email_html(results, date_str, market_data=None, all_stocks=None, category_stats=None):
+def sort_results_for_email(results, ticker_objects=None):
+    """Sort analysis results by category order, then ticker registration order."""
+    if not results:
+        return []
+
+    ticker_objects = ticker_objects or load_tickers_from_csv()
+    ticker_order = {}
+    ticker_category = {}
+    category_order = {}
+
+    for idx, item in enumerate(ticker_objects):
+        ticker = (item.get("ticker", "") or "").strip().upper()
+        category = (item.get("category", "") or "").strip() or "기타"
+        if not ticker:
+            continue
+        ticker_order[ticker] = idx
+        ticker_category[ticker] = category
+        if category not in category_order:
+            category_order[category] = len(category_order)
+
+    decorated = []
+    for idx, result in enumerate(results):
+        ticker = (result.get("ticker", "") or "").strip().upper()
+        category = (result.get("category", "") or "").strip() or ticker_category.get(ticker, "기타")
+        decorated.append((
+            category_order.get(category, 9999),
+            ticker_order.get(ticker, 9999),
+            idx,
+            {**result, "category": category},
+        ))
+
+    decorated.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [item[3] for item in decorated]
+
+
+def build_email_html(results, date_str, market_data=None, all_stocks=None, category_stats=None, ticker_objects=None):
     """Build HTML email in 맑은고딕 10.5pt with 시장/개별회사 sections."""
     from datetime import date as date_cls
 
@@ -951,6 +995,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
         date_label = date_str
 
     font_style = "font-family:'맑은고딕',Malgun Gothic,Arial,sans-serif;font-size:10.5pt;"
+    sorted_results = sort_results_for_email(results, ticker_objects=ticker_objects)
 
     # Build 시장 section
     market_lines = ""
@@ -979,7 +1024,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
 
     # Build 개별회사 section (2열 테이블 형식)
     company_rows = ""
-    for r in results:
+    for r in sorted_results:
         analysis_text = r.get("analysis", "").replace("\n", " ").strip()
         chg_html = fmt_chg(r["change_pct"], 1)
         company_rows += (
@@ -1012,7 +1057,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
     return body
 
 
-def build_email_text(results, date_str, market_data=None):
+def build_email_text(results, date_str, market_data=None, ticker_objects=None):
     """Build plain text for email copy —的市场/개별회사 format."""
     from datetime import date as date_cls
 
@@ -1048,6 +1093,8 @@ def build_email_text(results, date_str, market_data=None):
     except Exception:
         date_label = date_str
 
+    sorted_results = sort_results_for_email(results, ticker_objects=ticker_objects)
+
     lines = []
     lines.append("안녕하십니까,")
     lines.append(f"{date_label}일 종가기준 모니터링 업체 현황 송부드립니다.")
@@ -1079,9 +1126,9 @@ def build_email_text(results, date_str, market_data=None):
             lines.append("")
 
     # 개별회사 section
-    if results:
+    if sorted_results:
         lines.append("개별회사")
-        for r in results:
+        for r in sorted_results:
             analysis_text = r.get("analysis", "").replace("\n", " ").strip()
             lines.append(f"- {r['name']} ({fmt_chg(r['change_pct'])}): {analysis_text}")
 
@@ -1313,6 +1360,7 @@ def analyze_stream():
                     batch_results.append({
                         "ticker": ticker,
                         "name": meta.get("name") or info.get("name", ticker),
+                        "category": meta.get("category", ""),
                         "change_pct": info["change_pct"],
                         "analysis": result["analysis"],
                         "articles_found": len(articles) > 0,
@@ -1336,6 +1384,7 @@ def analyze_stream():
                     batch_results.append({
                         "ticker": ticker,
                         "name": meta.get("name") or info.get("name", ticker),
+                        "category": meta.get("category", ""),
                         "change_pct": info["change_pct"],
                         "analysis": f"분석 실패: {str(e)}",
                         "articles_found": False,
@@ -2251,6 +2300,7 @@ def run_scheduled_analysis(target_date=None):
                 results.append({
                     "ticker": ticker,
                     "name": meta.get("name") or info.get("name", ticker),
+                    "category": meta.get("category", ""),
                     "change_pct": info["change_pct"],
                     "analysis": result["analysis"],
                     "articles_found": len(articles) > 0,
@@ -2265,7 +2315,14 @@ def run_scheduled_analysis(target_date=None):
 
         # Phase 3: 이메일 전송
         date_str = str(target_date)
-        html_body = build_email_html(results, date_str, market_data=market_data, all_stocks=all_stocks, category_stats=category_stats)
+        html_body = build_email_html(
+            results,
+            date_str,
+            market_data=market_data,
+            all_stocks=all_stocks,
+            category_stats=category_stats,
+            ticker_objects=ticker_objects,
+        )
         all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")

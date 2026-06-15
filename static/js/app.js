@@ -799,7 +799,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/send-email", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ results: currentResults, market_data: currentMarketData }),
+                body: JSON.stringify({
+                    results: currentResults,
+                    market_data: currentMarketData,
+                    current_tickers: currentTickers,
+                }),
             });
             const data = await resp.json();
             if (resp.ok) {
@@ -886,6 +890,8 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         };
 
+        const sortedResults = sortResultsForEmail(currentResults);
+
         const lines = [];
         lines.push(escapeHtml("안녕하십니까,"));
         lines.push(escapeHtml(`${dateLabel}일 종가기준 모니터링 업체 현황 송부드립니다.`));
@@ -928,10 +934,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // 개별회사 section
-        if (currentResults.length > 0) {
+        if (sortedResults.length > 0) {
             lines.push("<b><u>개별회사</u></b>");
             const tableRows = [];
-            for (const r of currentResults) {
+            for (const r of sortedResults) {
                 const analysis = escapeHtml(stripEnglishAndRefs(r.analysis || ""));
                 const chgVal = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
                 const chgHtml = r.change_pct < 0
@@ -978,6 +984,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const fmtChg = (v) => v < 0 ? `△${Math.abs(v).toFixed(2)}%` : `${v.toFixed(2)}%`;
 
+        const sortedResults = sortResultsForEmail(currentResults);
+
         const lines = [];
         lines.push("안녕하십니까,");
         lines.push(`${dateLabel}일 종가기준 모니터링 업체 현황 송부드립니다.`);
@@ -1020,9 +1028,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // 개별회사 section
-        if (currentResults.length > 0) {
+        if (sortedResults.length > 0) {
             lines.push("[개별회사]");
-            for (const r of currentResults) {
+            for (const r of sortedResults) {
                 const analysis = stripEnglishAndRefs(r.analysis || "");
                 // 개별회사 등락률은 소수점 1자리
                 const chg1 = r.change_pct < 0 ? `△${Math.abs(r.change_pct).toFixed(1)}%` : `${r.change_pct.toFixed(1)}%`;
@@ -1044,6 +1052,35 @@ document.addEventListener("DOMContentLoaded", () => {
             preview.dataset.plainText = buildEmailTextPreviewPlain();
             section.style.display = "block";
         }
+    }
+
+    function sortResultsForEmail(results) {
+        const categoryOrder = new Map();
+        const tickerOrder = new Map();
+        const tickerCategory = new Map();
+
+        currentTickers.forEach((item, idx) => {
+            const ticker = (item.ticker || "").trim().toUpperCase();
+            const category = (item.category || "").trim() || "기타";
+            if (!ticker) return;
+            tickerOrder.set(ticker, idx);
+            tickerCategory.set(ticker, category);
+            if (!categoryOrder.has(category)) {
+                categoryOrder.set(category, categoryOrder.size);
+            }
+        });
+
+        return [...results].sort((a, b) => {
+            const tickerA = (a.ticker || "").trim().toUpperCase();
+            const tickerB = (b.ticker || "").trim().toUpperCase();
+            const categoryA = (a.category || tickerCategory.get(tickerA) || "").trim() || "기타";
+            const categoryB = (b.category || tickerCategory.get(tickerB) || "").trim() || "기타";
+            const catCmp = (categoryOrder.get(categoryA) ?? 9999) - (categoryOrder.get(categoryB) ?? 9999);
+            if (catCmp !== 0) return catCmp;
+            const tickCmp = (tickerOrder.get(tickerA) ?? 9999) - (tickerOrder.get(tickerB) ?? 9999);
+            if (tickCmp !== 0) return tickCmp;
+            return (a.name || tickerA).localeCompare(b.name || tickerB);
+        });
     }
 
     // Copy email text to clipboard (HTML rich text + plain fallback)
