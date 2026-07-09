@@ -1070,3 +1070,38 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .btn-copy:hover {
     background: #e5e9ef;
 }
+
+.fundamentals-table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 1400px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.fundamentals-table th,
+.fundamentals-table td {
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: right;
+}
+
+.fundamentals-table th:first-child,
+.fundamentals-table td:first-child {
+    text-align: left;
+    position: sticky;
+    left: 0;
+    background: #fff;
+}
+
+.fundamentals-table thead th {
+    background: #f0f4f8;
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.fundamentals-table tbody tr:nth-child(even) {
+    background: #fafbfc;
+}

@@ -77,6 +77,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const historicalDateSelect = document.getElementById("historicalDateSelect");
     const historicalStatus = document.getElementById("historicalStatus");
     const backToDefaultBtn = document.getElementById("backToDefaultBtn");
+    const dateSearchSection = document.getElementById("dateSearchSection");
+
+    // Settings panel toggle
+    const openSettingsBtn = document.getElementById("openSettingsBtn");
+    const settingsPanel = document.getElementById("settingsPanel");
+
+    // Email copy / fundamentals table sections
+    const emailCopySection = document.getElementById("emailCopySection");
+    const fundamentalsTableSection = document.getElementById("fundamentalsTableSection");
+    const fundamentalsTable = document.getElementById("fundamentalsTable");
+    const fundamentalsTableBody = document.getElementById("fundamentalsTableBody");
 
     // Store analysis results for email sending
     let currentResults = [];
@@ -126,6 +137,15 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     analyzeBtn.addEventListener("click", runAnalysis);
+
+    // Settings panel toggle (Ticker 등록 / 등록된 Tickers / 분석 설정 / 이메일 수신자 / GCS 동기화)
+    if (openSettingsBtn && settingsPanel) {
+        openSettingsBtn.addEventListener("click", () => {
+            const collapsed = settingsPanel.style.display === "none";
+            settingsPanel.style.display = collapsed ? "block" : "none";
+            openSettingsBtn.textContent = collapsed ? "⚙ 설정 닫기" : "⚙ 설정";
+        });
+    }
 
     // Ticker list toggle
     if (tickerListToggle && tickerListBody) {
@@ -1356,6 +1376,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (resultsDateBadge) resultsDateBadge.style.display = "none";
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
+        if (fundamentalsTableSection) { fundamentalsTableSection.style.display = "none"; if (fundamentalsTableBody) fundamentalsTableBody.innerHTML = ""; }
+        if (emailCopySection) emailCopySection.style.display = "none";
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
@@ -1392,7 +1414,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
                             case "market_indices":
                                 currentMarketData = { indices: data.indices, analysis: data.analysis, date: data.date };
-                                resultsSection.style.display = "block";
                                 renderMarketIndices(data);
                                 break;
 
@@ -1407,6 +1428,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                             case "fundamentals":
                                 Object.assign(currentFundamentals, data.fundamentals || {});
+                                renderFundamentalsTable(currentFundamentals);
                                 break;
 
                             case "results":
@@ -1588,6 +1610,76 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         return stats;
+    }
+
+    // ─── 종목별 엑셀표 (on-page fundamentals table) ───────────────────────
+    // Mirrors fundamentals.py's EXCEL_COLUMNS order/keys exactly.
+    const FUNDAMENTALS_COLUMNS = [
+        { key: "name", label: "회사명", fmt: "text" },
+        { key: "market_cap_usd", label: "시총", fmt: "usd" },
+        { key: "net_debt_usd", label: "순차입", fmt: "usd" },
+        { key: "change_pct_1d", label: "전일비 등락율", fmt: "pct" },
+        { key: "change_pct_2d", label: "2일전등락율", fmt: "pct" },
+        { key: "change_pct_3d", label: "3일전등락율", fmt: "pct" },
+        { key: "mktcap_52w_low_usd", label: "52주최저 시총", fmt: "usd" },
+        { key: "mktcap_52w_high_usd", label: "52주 최고시총", fmt: "usd" },
+        { key: "mktcap_52w_trend", label: "52주 시총추이", fmt: "text" },
+        { key: "pct_of_52w_high", label: "52주 최고시총비현재가", fmt: "pct" },
+        { key: "ev_ebitda_fy25", label: "EV/EBITDA(현재EV/25년말 EBITDA)", fmt: "ratio" },
+        { key: "ev_ebitda_fy26", label: "EV/EBITDA(현재/26년말 EBITDA)", fmt: "ratio" },
+        { key: "price_local", label: "주가(현지통화)", fmt: "num" },
+        { key: "revenue_fy25_usd", label: "매출(FY25)", fmt: "usd" },
+        { key: "revenue_fy26_usd", label: "매출(FY26)", fmt: "usd" },
+        { key: "operating_margin_fy25", label: "영업이익율(FY25)", fmt: "pct" },
+        { key: "operating_margin_fy26", label: "영업이익율(FY26)", fmt: "pct" },
+        { key: "ebitda_fy25_usd", label: "EBITDA(FY25)", fmt: "usd" },
+        { key: "ebitda_fy26_usd", label: "EBITDA(FY26)", fmt: "usd" },
+        { key: "ev_usd", label: "EV", fmt: "usd" },
+    ];
+
+    function formatFundamentalCell(value, fmt) {
+        if (value === null || value === undefined || value === "") return "-";
+        if (fmt === "usd" || fmt === "num") {
+            const num = Number(value);
+            if (Number.isNaN(num)) return "-";
+            return num.toLocaleString(undefined, { maximumFractionDigits: fmt === "usd" ? 0 : 2 });
+        }
+        if (fmt === "pct") {
+            const num = Number(value);
+            if (Number.isNaN(num)) return "-";
+            return `${num.toFixed(2)}%`;
+        }
+        if (fmt === "ratio") {
+            const num = Number(value);
+            if (Number.isNaN(num)) return "-";
+            return num.toFixed(2);
+        }
+        return String(value);
+    }
+
+    function renderFundamentalsTable(fundamentals) {
+        if (!fundamentalsTableSection || !fundamentalsTable || !fundamentalsTableBody) return;
+        const tickers = Object.keys(fundamentals || {});
+        if (tickers.length === 0) {
+            fundamentalsTableSection.style.display = "none";
+            return;
+        }
+
+        const order = new Map(currentTickers.map((t, i) => [t.ticker, i]));
+        tickers.sort((a, b) => (order.get(a) ?? 9999) - (order.get(b) ?? 9999));
+
+        const thead = fundamentalsTable.querySelector("thead");
+        if (thead) {
+            thead.innerHTML = `<tr>${FUNDAMENTALS_COLUMNS.map(col => `<th>${escapeHtml(col.label)}</th>`).join("")}</tr>`;
+        }
+
+        fundamentalsTableBody.innerHTML = tickers.map(ticker => {
+            const rec = fundamentals[ticker] || {};
+            const cells = FUNDAMENTALS_COLUMNS.map(col => `<td>${escapeHtml(formatFundamentalCell(rec[col.key], col.fmt))}</td>`).join("");
+            return `<tr>${cells}</tr>`;
+        }).join("");
+
+        fundamentalsTableSection.style.display = "block";
     }
 
     function renderMarketIndices(data) {
@@ -1853,6 +1945,8 @@ document.addEventListener("DOMContentLoaded", () => {
         analysisResults.innerHTML = "";
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
+        if (fundamentalsTableSection) fundamentalsTableSection.style.display = "none";
+        if (emailCopySection) emailCopySection.style.display = "none";
 
         currentMarketData = data.market_data || null;
         currentAllStocks = data.all_stocks || {};
@@ -1865,6 +1959,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.category_stats) renderCategoryStats(data.category_stats);
         renderAllStocksOverview(currentAllStocks);
         appendAnalysisResults(currentResults);
+        renderFundamentalsTable(currentFundamentals);
+        updateEmailCopyPreview();
     }
 
     async function loadDefaultResults() {
@@ -1951,7 +2047,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (downloadExcelBtn) downloadExcelBtn.style.display = "inline-flex";
             if (backToDefaultBtn) backToDefaultBtn.style.display = "inline-flex";
             if (historicalStatus) historicalStatus.textContent = "";
-            resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+            if (dateSearchSection) dateSearchSection.scrollIntoView({ behavior: "smooth", block: "start" });
         } catch (e) {
             if (historicalStatus) historicalStatus.textContent = "조회 중 오류가 발생했습니다.";
         }
