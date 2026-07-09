@@ -2,6 +2,7 @@ import os
 import gc
 import re
 import csv
+import io
 import json
 import logging
 import secrets
@@ -9,10 +10,12 @@ import smtplib
 from datetime import datetime, timedelta, timezone, date as date_cls
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, send_file
 import requests
 from google import genai
 from dotenv import load_dotenv
+
+import fundamentals
 
 # Memory monitoring
 try:
@@ -94,6 +97,103 @@ def gcs_upload(src_path, blob_name):
     except Exception as e:
         logger.error(f"GCS upload error ({blob_name}): {e}")
         return False
+
+
+def gcs_upload_json(obj, blob_name):
+    """Upload a JSON-serializable object directly to GCS (no local temp file)."""
+    _, bucket = _gcs_bucket()
+    if bucket is None:
+        return False
+    try:
+        blob = bucket.blob(blob_name)
+        blob.upload_from_string(json.dumps(obj, ensure_ascii=False), content_type="application/json")
+        logger.info(f"GCS: uploaded JSON -> gs://{GCS_BUCKET_NAME}/{blob_name}")
+        return True
+    except Exception as e:
+        logger.error(f"GCS JSON upload error ({blob_name}): {e}")
+        return False
+
+
+def gcs_download_json(blob_name):
+    """Download and parse a JSON blob from GCS. Returns dict or None."""
+    _, bucket = _gcs_bucket()
+    if bucket is None:
+        return None
+    try:
+        blob = bucket.blob(blob_name)
+        if not blob.exists():
+            return None
+        return json.loads(blob.download_as_text())
+    except Exception as e:
+        logger.error(f"GCS JSON download error ({blob_name}): {e}")
+        return None
+
+
+def gcs_list_blob_names(prefix):
+    """List blob names under a given prefix. Returns [] on failure."""
+    client, bucket = _gcs_bucket()
+    if bucket is None:
+        return []
+    try:
+        return [b.name for b in client.list_blobs(GCS_BUCKET_NAME, prefix=prefix)]
+    except Exception as e:
+        logger.error(f"GCS list_blobs error (prefix={prefix}): {e}")
+        return []
+
+
+RESULTS_POINTER_BLOB = "results/_pointer.json"
+RESULTS_DATE_BLOB_RE = re.compile(r"^results/(\d{4}-\d{2}-\d{2})\.json$")
+
+
+def save_results_to_gcs(date_str, payload, source="scheduled"):
+    """Persist one run's full result payload to GCS as the new default,
+    keyed by date. No-ops (with a warning) if GCS isn't configured — never
+    raises, so callers (scheduled run, manual save endpoint) stay safe."""
+    if not GCS_BUCKET_NAME:
+        logger.warning("save_results_to_gcs: GCS_BUCKET_NAME not configured, skipping")
+        return False
+    record = dict(payload)
+    record["date"] = date_str
+    record["saved_at"] = datetime.now(KST).isoformat()
+    record["source"] = source
+    ok = gcs_upload_json(record, f"results/{date_str}.json")
+    if ok:
+        gcs_upload_json(
+            {"current_date": date_str, "updated_at": record["saved_at"], "source": source},
+            RESULTS_POINTER_BLOB,
+        )
+    return ok
+
+
+def load_results_from_gcs(date_str):
+    """Load one saved date's result payload. Returns dict or None."""
+    if not GCS_BUCKET_NAME:
+        return None
+    return gcs_download_json(f"results/{date_str}.json")
+
+
+def load_latest_results_from_gcs():
+    """Load whatever the current default-pointer date's result is.
+    Returns dict or None if nothing has been saved yet."""
+    if not GCS_BUCKET_NAME:
+        return None
+    pointer = gcs_download_json(RESULTS_POINTER_BLOB)
+    if not pointer or not pointer.get("current_date"):
+        return None
+    return load_results_from_gcs(pointer["current_date"])
+
+
+def list_saved_result_dates():
+    """Return saved result dates, most recent first."""
+    if not GCS_BUCKET_NAME:
+        return []
+    names = gcs_list_blob_names("results/")
+    dates = []
+    for name in names:
+        m = RESULTS_DATE_BLOB_RE.match(name)
+        if m:
+            dates.append(m.group(1))
+    return sorted(dates, reverse=True)
 
 
 def startup_sync_from_gcs():
@@ -299,6 +399,7 @@ _scheduler = None
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
 ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
+FUNDAMENTALS_BATCH_SIZE = 10  # Fetch fundamentals (KRX/DART/FMP) in batches
 
 KST = timezone(timedelta(hours=9))
 
@@ -1303,6 +1404,22 @@ def analyze_stream():
 
         log_memory("AFTER FETCH")
 
+        # Phase 1.5: Fetch fundamentals (market cap, EV/EBITDA, revenue, etc.)
+        # for ALL tracked tickers, regardless of the change-% filter — this
+        # data feeds the Excel export and is independent of Gemini analysis.
+        fundamentals_data = {}
+        total_fund_batches = (len(ticker_objects) + FUNDAMENTALS_BATCH_SIZE - 1) // FUNDAMENTALS_BATCH_SIZE
+        for batch_idx in range(0, len(ticker_objects), FUNDAMENTALS_BATCH_SIZE):
+            batch = ticker_objects[batch_idx:batch_idx + FUNDAMENTALS_BATCH_SIZE]
+            batch_num = batch_idx // FUNDAMENTALS_BATCH_SIZE + 1
+            yield f"data: {json.dumps({'type': 'progress', 'message': f'펀더멘털 데이터 수집 중... ({batch_num}/{total_fund_batches})'})}\n\n"
+            for t in batch:
+                fundamentals_data[t["ticker"]] = fundamentals.fetch_fundamentals_for_ticker(
+                    t["ticker"], t, target_date=target_date
+                )
+            gc.collect()
+        yield f"data: {json.dumps({'type': 'fundamentals', 'fundamentals': fundamentals_data})}\n\n"
+
         if not filtered_list:
             yield f"data: {json.dumps({'type': 'done', 'message': f'변동률 {change_threshold:g}% 이상인 종목이 없습니다.'})}\n\n"
             return
@@ -2277,6 +2394,17 @@ def run_scheduled_analysis(target_date=None):
         logger.info(f"Filtered {len(filtered_list)} tickers above threshold {change_threshold}%")
         gc.collect()
 
+        # Phase 1.5: 펀더멘털 데이터 수집 (전체 종목 대상, 필터링 무관 — 엑셀 다운로드용)
+        logger.info("Fetching fundamentals data...")
+        fundamentals_data = {}
+        for batch_idx in range(0, len(ticker_objects), FUNDAMENTALS_BATCH_SIZE):
+            batch = ticker_objects[batch_idx:batch_idx + FUNDAMENTALS_BATCH_SIZE]
+            for t in batch:
+                fundamentals_data[t["ticker"]] = fundamentals.fetch_fundamentals_for_ticker(
+                    t["ticker"], t, target_date=target_date
+                )
+            gc.collect()
+
         # Phase 2: 종목별 뉴스 + Gemini 분석
         # Fetch Gmail memos once before the per-stock loop (avoids repeated IMAP connections)
         _gmail_cache = None
@@ -2315,34 +2443,51 @@ def run_scheduled_analysis(target_date=None):
 
         # Phase 3: 이메일 전송
         date_str = str(target_date)
-        html_body = build_email_html(
-            results,
-            date_str,
-            market_data=market_data,
-            all_stocks=all_stocks,
-            category_stats=category_stats,
-            ticker_objects=ticker_objects,
-        )
         all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
+        sent = False
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
-            return {"status": "done", "sent": False, "reason": "no recipients", "results_count": len(results)}
+        else:
+            html_body = build_email_html(
+                results,
+                date_str,
+                market_data=market_data,
+                all_stocks=all_stocks,
+                category_stats=category_stats,
+                ticker_objects=ticker_objects,
+            )
+            m2, d2 = date_str.split("-")[1], date_str.split("-")[2]
+            subject = f"[{int(m2)}/{int(d2)}일 종가기준] 모니터링 업체 현황"
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = EMAIL_FROM
+            msg["To"] = ", ".join(all_recipients)
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.ehlo()
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+            sent = True
+            logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
 
-        m2, d2 = date_str.split("-")[1], date_str.split("-")[2]
-        subject = f"[{int(m2)}/{int(d2)}일 종가기준] 모니터링 업체 현황"
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM
-        msg["To"] = ", ".join(all_recipients)
-        msg.attach(MIMEText(html_body, "html", "utf-8"))
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+        # Phase 4: GCS에 결과 저장 (수신자 유무와 무관하게 항상 실행 — 홈페이지 기본값이 됨)
+        save_results_to_gcs(date_str, {
+            "market_data": market_data,
+            "all_stocks": all_stocks,
+            "category_stats": category_stats,
+            "results": results,
+            "fundamentals": fundamentals_data,
+            "change_threshold": change_threshold,
+            "model_used": model,
+        }, source="scheduled")
 
-        logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
-        return {"status": "done", "sent": True, "recipients": all_recipients, "results_count": len(results), "date": date_str}
+        return {
+            "status": "done", "sent": sent,
+            "reason": None if sent else "no recipients",
+            "recipients": all_recipients if sent else [],
+            "results_count": len(results), "date": date_str,
+        }
 
     except Exception as e:
         logger.error(f"Scheduled analysis failed: {e}", exc_info=True)
@@ -2390,6 +2535,104 @@ def gcs_save():
 
     success = all(results.values())
     return jsonify({"success": success, "uploaded": results, "bucket": GCS_BUCKET_NAME}), (200 if success else 500)
+
+
+# ─── Saved Results (date-indexed GCS store) ───────────────────────────────────
+
+@app.route("/api/results/latest", methods=["GET"])
+def results_latest():
+    """홈페이지 기본값 — 가장 최근 저장(포인터가 가리키는) 결과."""
+    if not GCS_BUCKET_NAME:
+        return jsonify({"available": False, "reason": "GCS not configured"})
+    data = load_latest_results_from_gcs()
+    if not data:
+        return jsonify({"available": False})
+    data["available"] = True
+    return jsonify(data)
+
+
+@app.route("/api/results/dates", methods=["GET"])
+def results_dates():
+    """저장된 날짜 목록 (최신순)."""
+    return jsonify({"dates": list_saved_result_dates()})
+
+
+@app.route("/api/results/<date_str>", methods=["GET"])
+def results_by_date(date_str):
+    """특정 날짜의 저장된 결과 조회 (읽기 전용)."""
+    try:
+        date_cls.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
+    data = load_results_from_gcs(date_str)
+    if not data:
+        return jsonify({"error": f"{date_str} 저장된 결과가 없습니다"}), 404
+    data["available"] = True
+    return jsonify(data)
+
+
+@app.route("/api/results/save", methods=["POST"])
+def results_save():
+    """수동 실행("분석 실행") 결과를 새 기본값으로 저장."""
+    if not GCS_BUCKET_NAME:
+        return jsonify({"error": "GCS_BUCKET_NAME 환경변수가 설정되지 않았습니다"}), 400
+    if not HAS_GCS:
+        return jsonify({"error": "google-cloud-storage 패키지가 설치되지 않았습니다"}), 500
+
+    body = request.get_json(force=True, silent=True) or {}
+    date_str = body.get("date") or str(get_kst_today())
+    try:
+        date_cls.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
+
+    payload = {
+        "market_data": body.get("market_data"),
+        "all_stocks": body.get("all_stocks"),
+        "category_stats": body.get("category_stats"),
+        "results": body.get("results"),
+        "fundamentals": body.get("fundamentals"),
+        "change_threshold": body.get("change_threshold"),
+        "model_used": body.get("model_used"),
+    }
+    ok = save_results_to_gcs(date_str, payload, source="manual")
+    if not ok:
+        return jsonify({"error": "GCS 저장에 실패했습니다"}), 500
+    return jsonify({"success": True, "date": date_str})
+
+
+@app.route("/api/export/excel", methods=["GET"])
+def export_excel():
+    """저장된 결과의 펀더멘털 데이터를 엑셀(.xlsx)로 다운로드."""
+    date_str = request.args.get("date", "")
+    if not date_str:
+        pointer = gcs_download_json(RESULTS_POINTER_BLOB) if GCS_BUCKET_NAME else None
+        date_str = pointer.get("current_date") if pointer else None
+        if not date_str:
+            return jsonify({"error": "저장된 결과가 없습니다"}), 400
+    try:
+        date_cls.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
+
+    data = load_results_from_gcs(date_str)
+    if not data:
+        return jsonify({"error": f"{date_str} 저장된 결과가 없습니다"}), 404
+    fundamentals_data = data.get("fundamentals")
+    if not fundamentals_data:
+        return jsonify({"error": f"{date_str} 결과에는 펀더멘털 데이터가 없습니다 (이 기능 추가 이전 결과)"}), 400
+
+    ticker_objects = load_tickers_from_csv()
+    wb = fundamentals.build_fundamentals_workbook(fundamentals_data, ticker_objects)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=f"fundamentals_{date_str}.xlsx",
+    )
 
 
 @app.route("/api/webhook/info", methods=["GET"])

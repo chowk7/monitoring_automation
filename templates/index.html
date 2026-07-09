@@ -303,6 +303,22 @@
             </div>
         </section>
 
+        <!-- Historical date search -->
+        <section class="card" id="dateSearchSection">
+            <div class="section-header">
+                <h2>날짜별 결과 조회</h2>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <input type="date" id="historicalDateInput">
+                <button id="historicalLoadBtn" class="btn btn-save-model">조회</button>
+                <select id="historicalDateSelect" class="model-select" style="width:auto;">
+                    <option value="">저장된 날짜 목록...</option>
+                </select>
+                <span id="historicalStatus" style="font-size:13px;"></span>
+                <button id="backToDefaultBtn" class="btn btn-copy" style="display:none;">🏠 기본값으로 돌아가기</button>
+            </div>
+        </section>
+
         <!-- Analyze Section (always visible) -->
         <section class="card analyze-section">
             <!-- Analysis Date -->
@@ -341,6 +357,13 @@
         <section id="resultsSection" class="card results-section" style="display:none;">
             <div class="section-header">
                 <h2>분석 결과</h2>
+                <span id="resultsDateBadge" class="badge" style="display:none;"></span>
+                <button id="saveAsDefaultBtn" class="btn btn-save-model" style="display:none;">
+                    🏠 이 결과를 기본값으로 저장
+                </button>
+                <button id="downloadExcelBtn" class="btn btn-copy" style="display:none;">
+                    📊 엑셀 다운로드
+                </button>
                 <button id="sendEmailBtn" class="btn btn-email" style="display:none;">
                     ✉ 이메일 전송
                 </button>

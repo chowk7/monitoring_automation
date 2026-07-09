@@ -3,7 +3,7 @@ services:
     name: stock-movement-analyzer
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --timeout 300 --workers 1 --threads 1
+    startCommand: gunicorn app:app --timeout 600 --workers 1 --threads 1
     envVars:
       - key: GEMINI_API_KEY
         sync: false
@@ -14,6 +14,14 @@ services:
       - key: NEWS_API_KEY
         sync: false
       - key: EMAIL_TO
+        sync: false
+      - key: GCS_BUCKET_NAME
+        sync: false
+      - key: DART_API_KEY
+        sync: false
+      - key: KRX_API_KEY
+        sync: false
+      - key: FMP_API_KEY
         sync: false
       - key: PORT
         value: "10000"

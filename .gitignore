@@ -6,3 +6,4 @@ venv/
 *.egg-info/
 dist/
 build/
+dart_corp_codes.json

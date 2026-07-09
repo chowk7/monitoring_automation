@@ -17,6 +17,8 @@ steps:
       - '--platform'
       - 'managed'
       - '--allow-unauthenticated'
+      - '--timeout'
+      - '600'
 
 options:
   logging: CLOUD_LOGGING_ONLY

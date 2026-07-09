@@ -68,10 +68,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const marketIndicesGrid = document.getElementById("marketIndicesGrid");
     const marketIndicesAnalysis = document.getElementById("marketIndicesAnalysis");
 
+    // Saved-results / date-search elements
+    const saveAsDefaultBtn = document.getElementById("saveAsDefaultBtn");
+    const downloadExcelBtn = document.getElementById("downloadExcelBtn");
+    const resultsDateBadge = document.getElementById("resultsDateBadge");
+    const historicalDateInput = document.getElementById("historicalDateInput");
+    const historicalLoadBtn = document.getElementById("historicalLoadBtn");
+    const historicalDateSelect = document.getElementById("historicalDateSelect");
+    const historicalStatus = document.getElementById("historicalStatus");
+    const backToDefaultBtn = document.getElementById("backToDefaultBtn");
+
     // Store analysis results for email sending
     let currentResults = [];
     // Store market indices data for email
     let currentMarketData = null;
+    // Store all-stocks / category-stats / fundamentals for the currently displayed result set
+    let currentAllStocks = {};
+    let currentCategoryStats = {};
+    let currentFundamentals = {};
+    // Date currently displayed in resultsSection (default / manual run / historical browse)
+    let currentDisplayDate = null;
+    // True only for a fresh manual run's results, before they've been saved as default
+    let isLiveManualResult = false;
     // Store default prompts for reset
     let defaultPrompts = { with_articles: "", without_articles: "" };
     // Active EventSource (for stop functionality)
@@ -93,6 +111,8 @@ document.addEventListener("DOMContentLoaded", () => {
     loadScheduleStatus();
     loadEmailRecipients();
     loadWebhookInfo();
+    loadDefaultResults();
+    loadHistoricalDates();
 
     // ─── Event Listeners ─────────────────────────────────────────────────
 
@@ -1327,12 +1347,20 @@ document.addEventListener("DOMContentLoaded", () => {
         analysisResults.innerHTML = "";
         currentResults = [];
         currentMarketData = null;
+        currentAllStocks = {};
+        currentCategoryStats = {};
+        currentFundamentals = {};
+        isLiveManualResult = true;
+        if (saveAsDefaultBtn) saveAsDefaultBtn.style.display = "none";
+        if (downloadExcelBtn) downloadExcelBtn.style.display = "none";
+        if (resultsDateBadge) resultsDateBadge.style.display = "none";
         if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
         const dateStr = analysisDate ? analysisDate.value : getKstDateString();
         const customQuery = "";
+        currentDisplayDate = dateStr;
         const runId = ++analysisRunId;
         const tickers = currentTickers.map(item => item.ticker).filter(Boolean);
         const tickerBatches = chunkTickers(tickers, CLIENT_ANALYSIS_BATCH_SIZE);
@@ -1371,8 +1399,14 @@ document.addEventListener("DOMContentLoaded", () => {
                             case "stocks":
                                 resultsSection.style.display = "block";
                                 Object.assign(allStocksAggregate, data.all_stocks || {});
-                                renderCategoryStats(computeCategoryStats(allStocksAggregate));
+                                currentAllStocks = allStocksAggregate;
+                                currentCategoryStats = computeCategoryStats(allStocksAggregate);
+                                renderCategoryStats(currentCategoryStats);
                                 renderAllStocksOverview(allStocksAggregate);
+                                break;
+
+                            case "fundamentals":
+                                Object.assign(currentFundamentals, data.fundamentals || {});
                                 break;
 
                             case "results":
@@ -1407,6 +1441,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (sendEmailBtn && currentResults.length > 0) {
                     sendEmailBtn.style.display = "inline-flex";
+                }
+
+                // A fresh manual run — offer to save it as the new default, and
+                // allow excel download of its fundamentals data.
+                if (Object.keys(currentAllStocks).length > 0) {
+                    if (saveAsDefaultBtn) saveAsDefaultBtn.style.display = "inline-flex";
+                    if (downloadExcelBtn) downloadExcelBtn.style.display = "inline-flex";
+                    if (resultsDateBadge) {
+                        resultsDateBadge.textContent = `${currentDisplayDate} (미저장)`;
+                        resultsDateBadge.style.display = "inline-flex";
+                    }
                 }
 
                 updateEmailCopyPreview();
@@ -1799,4 +1844,140 @@ document.addEventListener("DOMContentLoaded", () => {
     if (gcsSaveBtn) gcsSaveBtn.addEventListener("click", saveToGcs);
 
     loadGcsStatus();
+
+    // ─── 저장된 결과 (홈페이지 기본값 / 날짜별 조회) ──────────────────────
+
+    function renderFullResults(data) {
+        resultsSection.style.display = "block";
+        allStocksOverview.innerHTML = "";
+        analysisResults.innerHTML = "";
+        if (categoryStats) { categoryStats.innerHTML = ""; categoryStats.style.display = "none"; }
+        if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
+
+        currentMarketData = data.market_data || null;
+        currentAllStocks = data.all_stocks || {};
+        currentCategoryStats = data.category_stats || {};
+        currentResults = data.results || [];
+        currentFundamentals = data.fundamentals || {};
+        currentDisplayDate = data.date;
+
+        if (data.market_data) renderMarketIndices(data.market_data);
+        if (data.category_stats) renderCategoryStats(data.category_stats);
+        renderAllStocksOverview(currentAllStocks);
+        appendAnalysisResults(currentResults);
+    }
+
+    async function loadDefaultResults() {
+        try {
+            const resp = await fetch("/api/results/latest");
+            const data = await resp.json();
+            if (!data.available) return;
+            isLiveManualResult = false;
+            renderFullResults(data);
+            if (resultsDateBadge) {
+                const sourceLabel = data.source === "scheduled" ? "자동" : "수동";
+                resultsDateBadge.textContent = `${data.date} (기본값 · ${sourceLabel} 저장)`;
+                resultsDateBadge.style.display = "inline-flex";
+            }
+            if (saveAsDefaultBtn) saveAsDefaultBtn.style.display = "none";
+            if (downloadExcelBtn) downloadExcelBtn.style.display = "inline-flex";
+        } catch (e) {
+            // 아직 저장된 기본값이 없거나 GCS 미설정 — 빈 화면 유지
+        }
+    }
+
+    async function saveCurrentAsDefault() {
+        if (!saveAsDefaultBtn) return;
+        saveAsDefaultBtn.disabled = true;
+        try {
+            const resp = await fetch("/api/results/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    date: currentDisplayDate,
+                    market_data: currentMarketData,
+                    all_stocks: currentAllStocks,
+                    category_stats: currentCategoryStats,
+                    results: currentResults,
+                    fundamentals: currentFundamentals,
+                }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                isLiveManualResult = false;
+                saveAsDefaultBtn.style.display = "none";
+                if (resultsDateBadge) resultsDateBadge.textContent = `${data.date} (기본값 · 수동 저장)`;
+                showSuccess("이 결과가 홈페이지 기본값으로 저장되었습니다.");
+                loadHistoricalDates();
+            } else {
+                showError(data.error || "저장에 실패했습니다.");
+            }
+        } catch (e) {
+            showError("저장 중 오류가 발생했습니다.");
+        } finally {
+            saveAsDefaultBtn.disabled = false;
+        }
+    }
+
+    async function loadHistoricalDates() {
+        if (!historicalDateSelect) return;
+        try {
+            const resp = await fetch("/api/results/dates");
+            const data = await resp.json();
+            const options = (data.dates || []).map(d => `<option value="${d}">${d}</option>`).join("");
+            historicalDateSelect.innerHTML = '<option value="">저장된 날짜 목록...</option>' + options;
+        } catch (e) {
+            // GCS 미설정 등 — 드롭다운은 빈 상태로 유지
+        }
+    }
+
+    async function loadHistoricalResult(dateStr) {
+        if (!dateStr) return;
+        if (historicalStatus) historicalStatus.textContent = "불러오는 중...";
+        try {
+            const resp = await fetch(`/api/results/${encodeURIComponent(dateStr)}`);
+            const data = await resp.json();
+            if (!resp.ok) {
+                if (historicalStatus) historicalStatus.textContent = data.error || "조회 실패";
+                return;
+            }
+            isLiveManualResult = false;
+            renderFullResults(data);
+            if (resultsDateBadge) {
+                resultsDateBadge.textContent = `${data.date} (조회 중 · 기본값 아님)`;
+                resultsDateBadge.style.display = "inline-flex";
+            }
+            if (saveAsDefaultBtn) saveAsDefaultBtn.style.display = "none";
+            if (downloadExcelBtn) downloadExcelBtn.style.display = "inline-flex";
+            if (backToDefaultBtn) backToDefaultBtn.style.display = "inline-flex";
+            if (historicalStatus) historicalStatus.textContent = "";
+            resultsSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (e) {
+            if (historicalStatus) historicalStatus.textContent = "조회 중 오류가 발생했습니다.";
+        }
+    }
+
+    function downloadExcel() {
+        const d = currentDisplayDate || "";
+        window.location.href = `/api/export/excel?date=${encodeURIComponent(d)}`;
+    }
+
+    if (saveAsDefaultBtn) saveAsDefaultBtn.addEventListener("click", saveCurrentAsDefault);
+    if (downloadExcelBtn) downloadExcelBtn.addEventListener("click", downloadExcel);
+    if (historicalLoadBtn) {
+        historicalLoadBtn.addEventListener("click", () => {
+            loadHistoricalResult(historicalDateInput ? historicalDateInput.value : "");
+        });
+    }
+    if (historicalDateSelect) {
+        historicalDateSelect.addEventListener("change", () => {
+            if (historicalDateSelect.value) loadHistoricalResult(historicalDateSelect.value);
+        });
+    }
+    if (backToDefaultBtn) {
+        backToDefaultBtn.addEventListener("click", () => {
+            backToDefaultBtn.style.display = "none";
+            loadDefaultResults();
+        });
+    }
 });
