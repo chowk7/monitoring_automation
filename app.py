@@ -396,6 +396,14 @@ _gemini_client = None
 # Scheduler singleton
 _scheduler = None
 
+# In-process cache of the most recent manual "분석 실행" run, keyed by date_str.
+# Populated incrementally by analyze_stream() as it streams (GET, unaffected by
+# the corporate network's large-POST-body block). The "결과 저장"/"이메일 전송"
+# buttons then only need to POST the date, not the full result blob, avoiding
+# the same 403 block documented in this repo's history for POST bodies.
+# Safe as a single process-wide dict: gunicorn runs --workers 1 --threads 1.
+_manual_run_cache = {}
+
 # Batch settings
 FETCH_BATCH_SIZE = 30  # Fetch tickers in batches
 ANALYSIS_BATCH_SIZE = 3  # Analyze filtered stocks in batches
@@ -950,14 +958,25 @@ def delete_email_recipient(email_addr):
 
 @app.route("/api/send-email", methods=["POST"])
 def send_email_report():
-    """Send analysis results via email."""
-    data = request.get_json()
-    results = data.get("results", [])
+    """Send analysis results via email.
+
+    요청 본문은 {"date": ..., "extra_to": [...]} 처럼 작아야 한다 — 실제 분석
+    데이터는 analyze_stream()이 채워둔 _manual_run_cache에서 가져온다. (전체
+    결과를 다시 POST로 보내면 사내 네트워크의 큰 POST 본문 차단(403)에 걸린다.)
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    date_str = data.get("date", "")
     extra_to = data.get("extra_to", [])  # Additional one-time recipients from request
-    market_data = data.get("market_data", None)
-    all_stocks = data.get("all_stocks", None)
-    category_stats = data.get("category_stats", None)
-    current_tickers = data.get("current_tickers", None)
+
+    cached = _manual_run_cache.get(date_str)
+    if not cached:
+        return jsonify({"error": "전송할 캐시된 분석 결과가 없습니다. 분석을 다시 실행해주세요."}), 400
+
+    results = cached.get("results") or []
+    market_data = cached.get("market_data")
+    all_stocks = cached.get("all_stocks")
+    category_stats = cached.get("category_stats")
+    current_tickers = load_tickers_from_csv()
 
     if not results:
         return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
@@ -1327,6 +1346,29 @@ def analyze_stream():
     # Custom search query (from query param, fallback to saved setting)
     custom_query = request.args.get("custom_query", "").strip() or settings.get("custom_query", "")
 
+    cache_date_str = str(target_date)
+    if not skip_market:
+        # First batch of a fresh run for this date — reset the server-side cache.
+        _manual_run_cache[cache_date_str] = {
+            "market_data": None,
+            "all_stocks": {},
+            "category_stats": {},
+            "results": [],
+            "fundamentals": {},
+            "change_threshold": change_threshold,
+            "model_used": model,
+        }
+    else:
+        _manual_run_cache.setdefault(cache_date_str, {
+            "market_data": None,
+            "all_stocks": {},
+            "category_stats": {},
+            "results": [],
+            "fundamentals": {},
+            "change_threshold": change_threshold,
+            "model_used": model,
+        })
+
     def generate():
         log_memory("STREAM START")
 
@@ -1354,6 +1396,9 @@ def analyze_stream():
                 for region, arts in articles_by_region.items()
             }
             yield f"data: {json.dumps({'type': 'market_indices', 'indices': indices_data, 'analysis': market_analysis, 'date': trade_date_for_market, 'articles_by_region': articles_by_region_slim})}\n\n"
+            _manual_run_cache[cache_date_str]["market_data"] = {
+                "indices": indices_data, "analysis": market_analysis, "date": trade_date_for_market,
+            }
             gc.collect()
 
         # Phase 1: Fetch all stock data in batches
@@ -1402,6 +1447,26 @@ def analyze_stream():
         # Send all_stocks data and category stats
         yield f"data: {json.dumps({'type': 'stocks', 'all_stocks': all_stocks_slim, 'category_stats': category_stats})}\n\n"
 
+        # Accumulate into the server-side cache across batched requests, then
+        # recompute category stats from the FULL accumulated all_stocks (not
+        # just this batch) so the cached snapshot reflects the whole run.
+        cached_all_stocks = _manual_run_cache[cache_date_str]["all_stocks"]
+        cached_all_stocks.update(all_stocks_slim)
+        cached_category_stats = {}
+        for tkr, info in cached_all_stocks.items():
+            cat = info.get("category") or "기타"
+            if cat not in cached_category_stats:
+                cached_category_stats[cat] = {"total": 0.0, "count": 0, "tickers": []}
+            cached_category_stats[cat]["tickers"].append(tkr)
+            if not info.get("error"):
+                cached_category_stats[cat]["total"] += info["change_pct"]
+                cached_category_stats[cat]["count"] += 1
+        for cat in cached_category_stats:
+            s = cached_category_stats[cat]
+            s["avg"] = round(s["total"] / s["count"], 2) if s["count"] else 0
+            del s["total"]
+        _manual_run_cache[cache_date_str]["category_stats"] = cached_category_stats
+
         log_memory("AFTER FETCH")
 
         # Phase 1.5: Fetch fundamentals (market cap, EV/EBITDA, revenue, etc.)
@@ -1419,6 +1484,7 @@ def analyze_stream():
                 )
             gc.collect()
         yield f"data: {json.dumps({'type': 'fundamentals', 'fundamentals': fundamentals_data})}\n\n"
+        _manual_run_cache[cache_date_str]["fundamentals"].update(fundamentals_data)
 
         if not filtered_list:
             yield f"data: {json.dumps({'type': 'done', 'message': f'변동률 {change_threshold:g}% 이상인 종목이 없습니다.'})}\n\n"
@@ -1515,6 +1581,7 @@ def analyze_stream():
 
             # Send batch results
             yield f"data: {json.dumps({'type': 'results', 'results': batch_results})}\n\n"
+            _manual_run_cache[cache_date_str]["results"].extend(batch_results)
 
             del batch_results
             gc.collect()
@@ -2573,7 +2640,13 @@ def results_by_date(date_str):
 
 @app.route("/api/results/save", methods=["POST"])
 def results_save():
-    """수동 실행("분석 실행") 결과를 새 기본값으로 저장."""
+    """수동 실행("분석 실행") 결과를 새 기본값으로 저장.
+
+    요청 본문은 날짜값만 담은 작은 JSON({"date": ...})이어야 한다 — 실제 분석
+    데이터는 analyze_stream()이 스트리밍하면서 이미 _manual_run_cache에 쌓아둔
+    것을 그대로 사용한다. (전체 결과를 다시 POST로 보내면 사내 네트워크의 큰
+    POST 본문 차단(403)에 걸리는 문제가 있어 이렇게 구조를 바꿨다.)
+    """
     if not GCS_BUCKET_NAME:
         return jsonify({"error": "GCS_BUCKET_NAME 환경변수가 설정되지 않았습니다"}), 400
     if not HAS_GCS:
@@ -2586,15 +2659,10 @@ def results_save():
     except ValueError:
         return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
 
-    payload = {
-        "market_data": body.get("market_data"),
-        "all_stocks": body.get("all_stocks"),
-        "category_stats": body.get("category_stats"),
-        "results": body.get("results"),
-        "fundamentals": body.get("fundamentals"),
-        "change_threshold": body.get("change_threshold"),
-        "model_used": body.get("model_used"),
-    }
+    payload = _manual_run_cache.get(date_str)
+    if not payload:
+        return jsonify({"error": "저장할 캐시된 분석 결과가 없습니다. 분석을 다시 실행해주세요."}), 400
+
     ok = save_results_to_gcs(date_str, payload, source="manual")
     if not ok:
         return jsonify({"error": "GCS 저장에 실패했습니다"}), 500

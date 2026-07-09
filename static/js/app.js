@@ -839,11 +839,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/send-email", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    results: currentResults,
-                    market_data: currentMarketData,
-                    current_tickers: currentTickers,
-                }),
+                body: JSON.stringify({ date: currentDisplayDate }),
             });
             const data = await resp.json();
             if (resp.ok) {
@@ -1989,14 +1985,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const resp = await fetch("/api/results/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    date: currentDisplayDate,
-                    market_data: currentMarketData,
-                    all_stocks: currentAllStocks,
-                    category_stats: currentCategoryStats,
-                    results: currentResults,
-                    fundamentals: currentFundamentals,
-                }),
+                body: JSON.stringify({ date: currentDisplayDate }),
             });
             const data = await resp.json();
             if (data.success) {
