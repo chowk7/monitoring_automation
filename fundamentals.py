@@ -575,26 +575,32 @@ def _finalize_derived_fields(record):
 def build_fundamentals_workbook(fundamentals, ticker_objects):
     """fundamentals: dict ticker -> record (from fetch_fundamentals_for_ticker).
     ticker_objects: list of {ticker, category, name} defining row order.
-    Returns an openpyxl.Workbook."""
+    Returns an openpyxl.Workbook.
+
+    A leading "Ticker" column is prepended ahead of the 20 EXCEL_COLUMNS —
+    it's not part of the requested column spec, but re-uploading an edited
+    copy of this file needs a stable, typo-proof key to match rows back to
+    tickers (company name alone is too fragile).
+    """
     from openpyxl import Workbook
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Fundamentals"
 
-    headers = [label for _, label, _, _ in EXCEL_COLUMNS]
+    headers = ["Ticker"] + [label for _, label, _, _ in EXCEL_COLUMNS]
     ws.append(headers)
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = "B2"
 
     for t in ticker_objects:
         record = fundamentals.get(t["ticker"], {})
-        row = [record.get(key) for key, _, _, _ in EXCEL_COLUMNS]
+        row = [t["ticker"]] + [record.get(key) for key, _, _, _ in EXCEL_COLUMNS]
         ws.append(row)
 
-    last_col_letter = ws.cell(row=1, column=len(EXCEL_COLUMNS)).column_letter
+    last_col_letter = ws.cell(row=1, column=len(EXCEL_COLUMNS) + 1).column_letter
     ws.auto_filter.ref = f"A1:{last_col_letter}{ws.max_row}"
 
-    for col_idx, (_, _, number_format, _) in enumerate(EXCEL_COLUMNS, start=1):
+    for col_idx, (_, _, number_format, _) in enumerate(EXCEL_COLUMNS, start=2):
         if number_format is None:
             continue
         col_letter = ws.cell(row=1, column=col_idx).column_letter

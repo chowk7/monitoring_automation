@@ -196,6 +196,46 @@ def list_saved_result_dates():
     return sorted(dates, reverse=True)
 
 
+def apply_fundamentals_overrides(date_str, overrides):
+    """Merge {ticker: {field: value}} overrides (from an uploaded Excel/CSV,
+    parsed client-side) into whichever fundamentals data currently represents
+    date_str. Returns (updated_fundamentals_dict, error_message_or_None).
+
+    Two targets, matching where date_str's data currently lives:
+    - A live/just-completed manual run still in `_manual_run_cache`: merge in
+      memory only — the existing "저장" button persists it to GCS later.
+    - An already-saved GCS blob (historical date): patch and re-upload it
+      immediately, since there's no separate "save" step for that case.
+      Deliberately does NOT touch the default-pointer blob — editing a past
+      date's fundamentals shouldn't make it the new homepage default.
+    """
+    cached = _manual_run_cache.get(date_str)
+    if cached is not None:
+        target = cached
+        persist_now = False
+    else:
+        if not GCS_BUCKET_NAME:
+            return None, "GCS_BUCKET_NAME 환경변수가 설정되지 않아 과거 저장본을 불러올 수 없습니다"
+        target = load_results_from_gcs(date_str)
+        if target is None:
+            return None, "해당 날짜에 저장된 결과가 없습니다. 먼저 분석을 실행하거나 날짜를 확인해주세요."
+        persist_now = True
+
+    fundamentals_dict = target.setdefault("fundamentals", {})
+    for ticker, fields in overrides.items():
+        rec = fundamentals_dict.setdefault(
+            ticker, {key: None for key, _, _, _ in fundamentals.EXCEL_COLUMNS}
+        )
+        rec.update(fields)
+
+    if persist_now:
+        target["date"] = date_str
+        target["saved_at"] = datetime.now(KST).isoformat()
+        gcs_upload_json(target, f"results/{date_str}.json")
+
+    return target["fundamentals"], None
+
+
 def startup_sync_from_gcs():
     """On app start, pull settings.json and tickers.csv from GCS when configured.
 
@@ -2667,6 +2707,31 @@ def results_save():
     if not ok:
         return jsonify({"error": "GCS 저장에 실패했습니다"}), 500
     return jsonify({"success": True, "date": date_str})
+
+
+@app.route("/api/results/fundamentals-override", methods=["POST"])
+def results_fundamentals_override():
+    """엑셀/CSV 업로드로 종목별 펀더멘털 값을 수동 보정.
+
+    파일 자체는 절대 서버로 전송하지 않는다 — 브라우저에서 파싱한 뒤 티커
+    소수개씩 청크로 나눠 이 라우트를 여러 번 호출한다(본문은
+    {"date": ..., "overrides": {ticker: {field: value}}} 수준으로 작게 유지 —
+    큰 POST 본문이 사내 네트워크에서 차단되는 문제를 피하기 위함).
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    date_str = body.get("date", "")
+    overrides = body.get("overrides") or {}
+    try:
+        date_cls.fromisoformat(date_str)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
+    if not overrides:
+        return jsonify({"error": "적용할 값이 없습니다"}), 400
+
+    updated, err = apply_fundamentals_overrides(date_str, overrides)
+    if err:
+        return jsonify({"error": err}), 400
+    return jsonify({"success": True, "updated_count": len(overrides)})
 
 
 @app.route("/api/export/excel", methods=["GET"])

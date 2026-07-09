@@ -88,6 +88,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const fundamentalsTableSection = document.getElementById("fundamentalsTableSection");
     const fundamentalsTable = document.getElementById("fundamentalsTable");
     const fundamentalsTableBody = document.getElementById("fundamentalsTableBody");
+    const fundamentalsUploadInput = document.getElementById("fundamentalsUploadInput");
+    const uploadExcelBtn = document.getElementById("uploadExcelBtn");
+    const uploadExcelStatus = document.getElementById("uploadExcelStatus");
 
     // Store analysis results for email sending
     let currentResults = [];
@@ -1611,6 +1614,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ─── 종목별 엑셀표 (on-page fundamentals table) ───────────────────────
     // Mirrors fundamentals.py's EXCEL_COLUMNS order/keys exactly.
     const FUNDAMENTALS_COLUMNS = [
+        { key: "ticker", label: "Ticker", fmt: "text" },
         { key: "name", label: "회사명", fmt: "text" },
         { key: "market_cap_usd", label: "시총", fmt: "usd" },
         { key: "net_debt_usd", label: "순차입", fmt: "usd" },
@@ -1671,11 +1675,192 @@ document.addEventListener("DOMContentLoaded", () => {
 
         fundamentalsTableBody.innerHTML = tickers.map(ticker => {
             const rec = fundamentals[ticker] || {};
-            const cells = FUNDAMENTALS_COLUMNS.map(col => `<td>${escapeHtml(formatFundamentalCell(rec[col.key], col.fmt))}</td>`).join("");
+            const cells = FUNDAMENTALS_COLUMNS.map(col => {
+                const value = col.key === "ticker" ? ticker : rec[col.key];
+                return `<td>${escapeHtml(formatFundamentalCell(value, col.fmt))}</td>`;
+            }).join("");
             return `<tr>${cells}</tr>`;
         }).join("");
 
         fundamentalsTableSection.style.display = "block";
+    }
+
+    // ─── 엑셀/CSV 업로드로 종목별 값 보정 ──────────────────────────────────
+    // 파일은 브라우저에서만 파싱하고, 실제 네트워크로는 작은 JSON 청크만
+    // 보낸다 (파일 바이너리를 그대로 POST하면 사내 네트워크의 큰 요청 차단에
+    // 걸릴 수 있어 이 구조를 택했다).
+
+    const FUNDAMENTALS_UPLOAD_CHUNK_SIZE = 20;
+
+    function parseFundamentalValue(raw, fmt) {
+        if (raw === null || raw === undefined) return undefined;
+        const str = String(raw).trim();
+        if (str === "" || str === "-") return undefined;
+        if (fmt === "text") return str;
+        const cleaned = str.replace(/,/g, "").replace(/%/g, "").trim();
+        const num = Number(cleaned);
+        if (Number.isNaN(num)) return undefined;
+        return num;
+    }
+
+    function rowsToFundamentalsOverrides(rows) {
+        const overrides = {};
+        for (const row of rows) {
+            const tickerRaw = row["Ticker"] ?? row["ticker"] ?? row["TICKER"] ?? "";
+            const ticker = String(tickerRaw).trim();
+            if (!ticker) continue;
+            const fields = {};
+            for (const col of FUNDAMENTALS_COLUMNS) {
+                if (col.key === "ticker") continue;
+                const value = parseFundamentalValue(row[col.label], col.fmt);
+                if (value !== undefined) fields[col.key] = value;
+            }
+            if (Object.keys(fields).length > 0) {
+                overrides[ticker] = fields;
+            }
+        }
+        return overrides;
+    }
+
+    // 가벼운 CSV 파서 (따옴표로 감싼 콤마/따옴표만 지원 — 라이브러리 없이 폴백 경로용)
+    function parseCsvText(text) {
+        const lines = text.split(/\r\n|\n|\r/).filter(l => l.length > 0);
+        if (lines.length === 0) return [];
+        const parseLine = (line) => {
+            const fields = [];
+            let cur = "";
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (inQuotes) {
+                    if (ch === '"') {
+                        if (line[i + 1] === '"') { cur += '"'; i++; }
+                        else inQuotes = false;
+                    } else {
+                        cur += ch;
+                    }
+                } else if (ch === '"') {
+                    inQuotes = true;
+                } else if (ch === ",") {
+                    fields.push(cur);
+                    cur = "";
+                } else {
+                    cur += ch;
+                }
+            }
+            fields.push(cur);
+            return fields;
+        };
+        const headers = parseLine(lines[0]).map(h => h.trim());
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+            const fields = parseLine(lines[i]);
+            const row = {};
+            headers.forEach((h, idx) => { row[h] = fields[idx] !== undefined ? fields[idx] : ""; });
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    function handleFundamentalsFileSelected(file) {
+        if (!file) return;
+        const name = file.name.toLowerCase();
+        const reader = new FileReader();
+        reader.onerror = () => {
+            if (uploadExcelStatus) uploadExcelStatus.textContent = "파일을 읽는 중 오류가 발생했습니다.";
+        };
+
+        if (name.endsWith(".csv")) {
+            reader.onload = (e) => {
+                try {
+                    const rows = parseCsvText(e.target.result);
+                    uploadFundamentalsOverrides(rowsToFundamentalsOverrides(rows));
+                } catch (err) {
+                    if (uploadExcelStatus) uploadExcelStatus.textContent = "CSV 파싱 중 오류가 발생했습니다.";
+                }
+            };
+            reader.readAsText(file, "utf-8");
+        } else {
+            if (typeof XLSX === "undefined") {
+                if (uploadExcelStatus) uploadExcelStatus.textContent = "엑셀 파싱 라이브러리를 불러오지 못했습니다. CSV로 저장 후 다시 시도해주세요.";
+                return;
+            }
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const wb = XLSX.read(data, { type: "array" });
+                    const sheet = wb.Sheets[wb.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+                    uploadFundamentalsOverrides(rowsToFundamentalsOverrides(rows));
+                } catch (err) {
+                    if (uploadExcelStatus) uploadExcelStatus.textContent = "엑셀 파싱 중 오류가 발생했습니다.";
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    }
+
+    async function uploadFundamentalsOverrides(overrides) {
+        const tickers = Object.keys(overrides);
+        if (tickers.length === 0) {
+            if (uploadExcelStatus) uploadExcelStatus.textContent = "인식할 수 있는 값이 없습니다 (Ticker 열을 확인해주세요).";
+            return;
+        }
+        if (!currentDisplayDate) {
+            if (uploadExcelStatus) uploadExcelStatus.textContent = "먼저 결과를 불러오거나 분석을 실행해주세요.";
+            return;
+        }
+
+        const chunks = [];
+        for (let i = 0; i < tickers.length; i += FUNDAMENTALS_UPLOAD_CHUNK_SIZE) {
+            chunks.push(tickers.slice(i, i + FUNDAMENTALS_UPLOAD_CHUNK_SIZE));
+        }
+
+        if (uploadExcelBtn) uploadExcelBtn.disabled = true;
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < chunks.length; i++) {
+            if (uploadExcelStatus) uploadExcelStatus.textContent = `업로드 중... (${i + 1}/${chunks.length})`;
+            const chunkOverrides = {};
+            for (const t of chunks[i]) chunkOverrides[t] = overrides[t];
+            try {
+                const resp = await fetch("/api/results/fundamentals-override", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ date: currentDisplayDate, overrides: chunkOverrides }),
+                });
+                const data = await resp.json();
+                if (resp.ok && data.success) {
+                    for (const t of chunks[i]) {
+                        currentFundamentals[t] = Object.assign({}, currentFundamentals[t] || {}, chunkOverrides[t]);
+                    }
+                    successCount += chunks[i].length;
+                } else {
+                    failCount += chunks[i].length;
+                }
+            } catch (e) {
+                failCount += chunks[i].length;
+            }
+        }
+
+        renderFundamentalsTable(currentFundamentals);
+        if (uploadExcelBtn) uploadExcelBtn.disabled = false;
+        if (uploadExcelStatus) {
+            uploadExcelStatus.textContent = failCount > 0
+                ? `완료: ${successCount}개 반영, ${failCount}개 실패`
+                : `✓ ${successCount}개 종목 반영 완료`;
+            setTimeout(() => { uploadExcelStatus.textContent = ""; }, 6000);
+        }
+    }
+
+    if (uploadExcelBtn && fundamentalsUploadInput) {
+        uploadExcelBtn.addEventListener("click", () => fundamentalsUploadInput.click());
+        fundamentalsUploadInput.addEventListener("change", () => {
+            const file = fundamentalsUploadInput.files && fundamentalsUploadInput.files[0];
+            handleFundamentalsFileSelected(file);
+            fundamentalsUploadInput.value = "";
+        });
     }
 
     function renderMarketIndices(data) {

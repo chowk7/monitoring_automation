@@ -386,7 +386,15 @@
                 <button id="downloadExcelBtn" class="btn btn-copy">
                     📊 엑셀 다운로드
                 </button>
+                <input type="file" id="fundamentalsUploadInput" accept=".xlsx,.xls,.csv" style="display:none;">
+                <button id="uploadExcelBtn" class="btn btn-copy">
+                    📤 엑셀 업로드
+                </button>
+                <span id="uploadExcelStatus" style="font-size:13px;"></span>
             </div>
+            <small class="settings-hint" style="display:block;margin-bottom:10px;">
+                업로드한 값은 API로 가져온 값보다 우선 적용됩니다 · 다운로드한 파일을 그대로 수정 후 재업로드하면 Ticker 열로 안전하게 매칭됩니다 · 파일은 브라우저에서만 처리되며 서버로 전송되지 않습니다.
+            </small>
             <div style="overflow-x:auto;">
                 <table id="fundamentalsTable" class="fundamentals-table">
                     <thead></thead>
@@ -426,6 +434,7 @@
         </section>
     </div>
 
+    <script src="/static/js/vendor/xlsx.full.min.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>
