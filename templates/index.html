@@ -367,6 +367,30 @@
             </div>
         </section>
 
+        <!-- 종목별 결과 조회 -->
+        <section class="card" id="tickerSearchSection">
+            <div class="section-header">
+                <h2>종목별 결과 조회</h2>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <label for="tickerSearchStartDate">기간</label>
+                <input type="date" id="tickerSearchStartDate">
+                <span>~</span>
+                <input type="date" id="tickerSearchEndDate">
+                <select id="tickerSearchSelect" class="model-select" style="width:auto;">
+                    <option value="">종목 선택...</option>
+                </select>
+                <button id="tickerSearchBtn" class="btn btn-save-model">조회</button>
+                <span id="tickerSearchStatus" style="font-size:13px;"></span>
+            </div>
+            <div id="tickerSearchResultContainer" style="display:none;margin-top:14px;overflow-x:auto;">
+                <table class="fundamentals-table">
+                    <thead><tr><th>날짜</th><th>등락율</th><th>등락 원인</th></tr></thead>
+                    <tbody id="tickerSearchTableBody"></tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- 2. 이메일 복붙용 결과 -->
         <section id="emailCopySection" class="card" style="display:none;">
             <div class="section-header">

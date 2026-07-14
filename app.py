@@ -2664,6 +2664,49 @@ def results_dates():
     return jsonify({"dates": list_saved_result_dates()})
 
 
+@app.route("/api/results/ticker-history", methods=["GET"])
+def results_ticker_history():
+    """특정 종목의 등락율/등락 원인을 기간 내 저장된 날짜별로 조회."""
+    ticker = request.args.get("ticker", "").strip().upper()
+    start_str = request.args.get("start", "")
+    end_str = request.args.get("end", "")
+
+    if not ticker:
+        return jsonify({"error": "종목(ticker)을 지정해주세요"}), 400
+    try:
+        date_cls.fromisoformat(start_str)
+        date_cls.fromisoformat(end_str)
+    except ValueError:
+        return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
+    if start_str > end_str:
+        return jsonify({"error": "시작일이 종료일보다 늦을 수 없습니다"}), 400
+
+    all_dates = list_saved_result_dates()
+    in_range = sorted((d for d in all_dates if start_str <= d <= end_str), reverse=True)
+
+    rows = []
+    for date_str in in_range:
+        data = load_results_from_gcs(date_str)
+        if not data:
+            continue
+        stock_info = (data.get("all_stocks") or {}).get(ticker)
+        if not stock_info:
+            continue
+        analysis_entry = next(
+            (r for r in (data.get("results") or []) if r.get("ticker") == ticker), None
+        )
+        rows.append({
+            "date": date_str,
+            "name": stock_info.get("name", ticker),
+            "change_pct": stock_info.get("change_pct"),
+            "error": stock_info.get("error"),
+            "analyzed": analysis_entry is not None,
+            "analysis": analysis_entry.get("analysis") if analysis_entry else None,
+        })
+
+    return jsonify({"ticker": ticker, "rows": rows})
+
+
 @app.route("/api/results/<date_str>", methods=["GET"])
 def results_by_date(date_str):
     """특정 날짜의 저장된 결과 조회 (읽기 전용)."""

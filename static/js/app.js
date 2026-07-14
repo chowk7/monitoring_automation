@@ -79,6 +79,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const backToDefaultBtn = document.getElementById("backToDefaultBtn");
     const dateSearchSection = document.getElementById("dateSearchSection");
 
+    // 종목별 결과 조회 elements
+    const tickerSearchStartDate = document.getElementById("tickerSearchStartDate");
+    const tickerSearchEndDate = document.getElementById("tickerSearchEndDate");
+    const tickerSearchSelect = document.getElementById("tickerSearchSelect");
+    const tickerSearchBtn = document.getElementById("tickerSearchBtn");
+    const tickerSearchStatus = document.getElementById("tickerSearchStatus");
+    const tickerSearchResultContainer = document.getElementById("tickerSearchResultContainer");
+    const tickerSearchTableBody = document.getElementById("tickerSearchTableBody");
+
     // Settings panel toggle
     const openSettingsBtn = document.getElementById("openSettingsBtn");
     const settingsPanel = document.getElementById("settingsPanel");
@@ -1295,6 +1304,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderTickers(tickers) {
         currentTickers = Array.isArray(tickers) ? tickers.slice() : [];
+        populateTickerSearchSelect();
         tickerCount.textContent = tickers.length;
         analyzeBtn.disabled = tickers.length === 0;
 
@@ -2250,4 +2260,105 @@ document.addEventListener("DOMContentLoaded", () => {
             loadDefaultResults();
         });
     }
+
+    // ─── 종목별 결과 조회 ────────────────────────────────────────────────
+
+    function populateTickerSearchSelect() {
+        if (!tickerSearchSelect) return;
+        const prevValue = tickerSearchSelect.value;
+        const options = currentTickers.map(t =>
+            `<option value="${escapeHtml(t.ticker)}">${escapeHtml(t.ticker)}${t.name ? ` · ${escapeHtml(t.name)}` : ""}</option>`
+        ).join("");
+        tickerSearchSelect.innerHTML = '<option value="">종목 선택...</option>' + options;
+        if (prevValue && currentTickers.some(t => t.ticker === prevValue)) {
+            tickerSearchSelect.value = prevValue;
+        }
+    }
+
+    // 기간 기본값: 최근 30일 (제한은 없음 — 사용자가 자유롭게 변경 가능)
+    if (tickerSearchEndDate && !tickerSearchEndDate.value) {
+        tickerSearchEndDate.value = getKstDateString();
+    }
+    if (tickerSearchStartDate && !tickerSearchStartDate.value) {
+        const now = new Date();
+        const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+        kst.setUTCDate(kst.getUTCDate() - 30);
+        tickerSearchStartDate.value = kst.toISOString().slice(0, 10);
+    }
+
+    async function runTickerSearch() {
+        const ticker = tickerSearchSelect ? tickerSearchSelect.value : "";
+        const start = tickerSearchStartDate ? tickerSearchStartDate.value : "";
+        const end = tickerSearchEndDate ? tickerSearchEndDate.value : "";
+
+        if (!ticker) {
+            if (tickerSearchStatus) tickerSearchStatus.textContent = "종목을 선택해주세요.";
+            return;
+        }
+        if (!start || !end) {
+            if (tickerSearchStatus) tickerSearchStatus.textContent = "기간을 선택해주세요.";
+            return;
+        }
+
+        if (tickerSearchStatus) tickerSearchStatus.textContent = "조회 중...";
+        if (tickerSearchBtn) tickerSearchBtn.disabled = true;
+
+        try {
+            const params = new URLSearchParams({ ticker, start, end });
+            const resp = await fetch(`/api/results/ticker-history?${params.toString()}`);
+            const data = await resp.json();
+            if (!resp.ok) {
+                if (tickerSearchStatus) tickerSearchStatus.textContent = data.error || "조회 실패";
+                if (tickerSearchResultContainer) tickerSearchResultContainer.style.display = "none";
+                return;
+            }
+            renderTickerSearchResults(data.rows || []);
+            if (tickerSearchStatus) {
+                tickerSearchStatus.textContent = data.rows && data.rows.length > 0
+                    ? ""
+                    : "해당 기간에 저장된 결과가 없습니다.";
+            }
+        } catch (e) {
+            if (tickerSearchStatus) tickerSearchStatus.textContent = "조회 중 오류가 발생했습니다.";
+        } finally {
+            if (tickerSearchBtn) tickerSearchBtn.disabled = false;
+        }
+    }
+
+    function renderTickerSearchResults(rows) {
+        if (!tickerSearchTableBody || !tickerSearchResultContainer) return;
+        if (rows.length === 0) {
+            tickerSearchResultContainer.style.display = "none";
+            tickerSearchTableBody.innerHTML = "";
+            return;
+        }
+
+        tickerSearchTableBody.innerHTML = rows.map(row => {
+            let changeHtml = "-";
+            if (typeof row.change_pct === "number") {
+                const cls = row.change_pct > 0 ? "positive" : row.change_pct < 0 ? "negative" : "neutral";
+                const sign = row.change_pct > 0 ? "+" : "";
+                changeHtml = `<span class="result-change ${cls}">${sign}${row.change_pct.toFixed(1)}%</span>`;
+            }
+
+            let reasonText;
+            if (row.error) {
+                reasonText = "데이터 오류";
+            } else if (row.analyzed) {
+                reasonText = row.analysis || "-";
+            } else {
+                reasonText = "임계값 미만 (분석 안함)";
+            }
+
+            return `<tr>
+                <td>${escapeHtml(row.date)}</td>
+                <td>${changeHtml}</td>
+                <td style="white-space:pre-wrap;text-align:left;">${escapeHtml(reasonText)}</td>
+            </tr>`;
+        }).join("");
+
+        tickerSearchResultContainer.style.display = "block";
+    }
+
+    if (tickerSearchBtn) tickerSearchBtn.addEventListener("click", runTickerSearch);
 });
