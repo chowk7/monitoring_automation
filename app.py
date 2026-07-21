@@ -1029,13 +1029,14 @@ def send_email_report():
     if not all_recipients:
         return jsonify({"error": "수신자 이메일이 없습니다. 수신자를 추가해주세요."}), 400
 
-    # Build HTML email
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    m, d = today.split("-")[1], today.split("-")[2]
+    # Build HTML email.  Use the cached run's own date, not the server's
+    # current date — otherwise emailing a historical analysis mislabels it
+    # as today.
+    m, d = date_str.split("-")[1], date_str.split("-")[2]
     subject = f"[{int(m)}/{int(d)}일 종가기준] 모니터링 업체 현황"
     html_body = build_email_html(
         results,
-        today,
+        date_str,
         market_data=market_data,
         all_stocks=all_stocks,
         category_stats=category_stats,
@@ -2791,7 +2792,9 @@ def export_excel():
     except ValueError:
         return jsonify({"error": "잘못된 날짜 형식입니다 (YYYY-MM-DD)"}), 400
 
-    data = load_results_from_gcs(date_str)
+    # 방금 실행했지만 아직 "저장"하지 않은 결과도 다운로드할 수 있어야 하므로
+    # 먼저 인메모리 캐시를 확인하고, 없으면 GCS에 저장된 과거 결과를 본다.
+    data = _manual_run_cache.get(date_str) or load_results_from_gcs(date_str)
     if not data:
         return jsonify({"error": f"{date_str} 저장된 결과가 없습니다"}), 404
     fundamentals_data = data.get("fundamentals")
