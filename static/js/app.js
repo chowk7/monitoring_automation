@@ -78,12 +78,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentEventSource = null;
     let currentTickers = [];
     let analysisRunId = 0;
+    // Keep the date that produced the displayed results.  The date input can
+    // change afterwards, but copied/sent email must stay tied to its results.
+    let currentAnalysisDate = "";
 
     const CLIENT_ANALYSIS_BATCH_SIZE = 25;
 
     // ─── Init ─────────────────────────────────────────────────────────────
 
-    // Set default analysis date to yesterday in KST
+    // Default to the previous KST trading weekday. Users can still select an
+    // earlier or current date for a historical/intraday analysis.
     if (analysisDate) {
         analysisDate.value = getKstYesterdayString();
     }
@@ -803,6 +807,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     results: currentResults,
                     market_data: currentMarketData,
                     current_tickers: currentTickers,
+                    date: currentAnalysisDate || (analysisDate ? analysisDate.value : getKstDateString()),
                 }),
             });
             const data = await resp.json();
@@ -871,8 +876,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("analysisDate");
-        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
+        const dateStr = currentAnalysisDate || (analysisDate ? analysisDate.value : getKstDateString());
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
@@ -974,8 +978,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("analysisDate");
-        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
+        const dateStr = currentAnalysisDate || (analysisDate ? analysisDate.value : getKstDateString());
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
@@ -1331,7 +1334,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (marketIndicesSection) { marketIndicesSection.style.display = "none"; marketIndicesGrid.innerHTML = ""; marketIndicesAnalysis.style.display = "none"; }
 
         const selectedModel = modelSelect ? (modelSelect.value.trim() || "gemini-2.5-pro") : "gemini-2.5-pro";
-        const dateStr = analysisDate ? analysisDate.value : getKstDateString();
+        const dateStr = (analysisDate && analysisDate.value) || getKstDateString();
+        // Snapshot the selected date at the start of this run.  Result cards,
+        // clipboard content, and sent email all use this same date.
+        currentAnalysisDate = dateStr;
         const customQuery = "";
         const runId = ++analysisRunId;
         const tickers = currentTickers.map(item => item.ticker).filter(Boolean);

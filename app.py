@@ -858,6 +858,15 @@ def send_email_report():
     category_stats = data.get("category_stats", None)
     current_tickers = data.get("current_tickers", None)
 
+    # The browser sends the date used to generate these results.  Do not
+    # replace it with the server's current date, which can label historical
+    # analyses (and copied email) as the wrong day.
+    requested_date = str(data.get("date", "")).strip()
+    try:
+        report_date = date_cls.fromisoformat(requested_date) if requested_date else get_kst_today()
+    except ValueError:
+        report_date = get_kst_today()
+
     if not results:
         return jsonify({"error": "전송할 분석 결과가 없습니다"}), 400
 
@@ -870,12 +879,12 @@ def send_email_report():
         return jsonify({"error": "수신자 이메일이 없습니다. 수신자를 추가해주세요."}), 400
 
     # Build HTML email
-    today = datetime.now(KST).strftime("%Y-%m-%d")
-    m, d = today.split("-")[1], today.split("-")[2]
+    report_date_str = report_date.isoformat()
+    m, d = report_date_str.split("-")[1], report_date_str.split("-")[2]
     subject = f"[{int(m)}/{int(d)}일 종가기준] 모니터링 업체 현황"
     html_body = build_email_html(
         results,
-        today,
+        report_date_str,
         market_data=market_data,
         all_stocks=all_stocks,
         category_stats=category_stats,
