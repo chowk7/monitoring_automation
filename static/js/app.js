@@ -919,8 +919,9 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("analysisDate");
-        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
+        // 현재 화면에 표시 중인 결과의 날짜를 써야 한다 — "분석 실행" 폼의
+        // 날짜 입력칸은 과거 결과를 조회 중일 때도 그대로 남아있어 어긋난다.
+        const dateStr = currentDisplayDate || document.getElementById("analysisDate")?.value || getKstYesterdayString();
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
@@ -1022,8 +1023,7 @@ document.addEventListener("DOMContentLoaded", () => {
             ["유\u00a0\u00a0럽", ["영국", "프랑스", "독일"]],
         ];
 
-        const dateInput = document.getElementById("analysisDate");
-        const dateStr = dateInput ? dateInput.value : getKstYesterdayString();
+        const dateStr = currentDisplayDate || document.getElementById("analysisDate")?.value || getKstYesterdayString();
         let dateLabel = dateStr;
         try {
             const [y, m, d] = dateStr.split("-");
