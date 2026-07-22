@@ -259,12 +259,15 @@ NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
 
-# Email configuration
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USER)
+# Email configuration.  The Cloud Run deployment for this service was set up
+# with an "EMAIL_*" naming convention (EMAIL_SMTP_SERVER, EMAIL_SENDER,
+# EMAIL_PASSWORD, ...) instead of the SMTP_* names documented in
+# .env.example, so accept either — SMTP_* wins if both are set.
+SMTP_HOST = os.getenv("SMTP_HOST") or os.getenv("EMAIL_SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT") or os.getenv("EMAIL_SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER") or os.getenv("EMAIL_SENDER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD") or os.getenv("EMAIL_PASSWORD", "")
+EMAIL_FROM = os.getenv("EMAIL_FROM") or os.getenv("EMAIL_SENDER") or SMTP_USER
 EMAIL_TO_DEFAULT = os.getenv("EMAIL_TO", "")  # comma-separated default recipients (env)
 DEFAULT_EMAIL_RECIPIENTS = list(dict.fromkeys(
     [e.strip() for e in EMAIL_TO_DEFAULT.split(",") if e.strip()]
