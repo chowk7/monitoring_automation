@@ -2549,37 +2549,44 @@ def run_scheduled_analysis(target_date=None):
                 logger.error(f"Scheduled analysis error for {ticker}: {e}")
             gc.collect()
 
-        # Phase 3: 이메일 전송
+        # Phase 3: 이메일 전송.  SMTP 실패(자격증명 만료 등)가 나도 아래 Phase 4
+        # GCS 저장은 반드시 실행되어야 하므로, 이 블록만 따로 감싼다 — 그렇지
+        # 않으면 예외가 함수 전체를 중단시켜 분석 결과가 통째로 유실된다.
         date_str = str(target_date)
         all_recipients = list(set(DEFAULT_EMAIL_RECIPIENTS + settings.get("email_recipients", [])))
         sent = False
+        email_error = None
         if not all_recipients:
             logger.warning("Scheduled analysis: no recipients configured, skipping email")
         else:
-            html_body = build_email_html(
-                results,
-                date_str,
-                market_data=market_data,
-                all_stocks=all_stocks,
-                category_stats=category_stats,
-                ticker_objects=ticker_objects,
-            )
-            m2, d2 = date_str.split("-")[1], date_str.split("-")[2]
-            subject = f"[{int(m2)}/{int(d2)}일 종가기준] 모니터링 업체 현황"
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = EMAIL_FROM
-            msg["To"] = ", ".join(all_recipients)
-            msg.attach(MIMEText(html_body, "html", "utf-8"))
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-                server.ehlo()
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASSWORD)
-                server.sendmail(SMTP_USER, all_recipients, msg.as_string())
-            sent = True
-            logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
+            try:
+                html_body = build_email_html(
+                    results,
+                    date_str,
+                    market_data=market_data,
+                    all_stocks=all_stocks,
+                    category_stats=category_stats,
+                    ticker_objects=ticker_objects,
+                )
+                m2, d2 = date_str.split("-")[1], date_str.split("-")[2]
+                subject = f"[{int(m2)}/{int(d2)}일 종가기준] 모니터링 업체 현황"
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = EMAIL_FROM
+                msg["To"] = ", ".join(all_recipients)
+                msg.attach(MIMEText(html_body, "html", "utf-8"))
+                with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                    server.sendmail(SMTP_USER, all_recipients, msg.as_string())
+                sent = True
+                logger.info(f"Scheduled analysis complete: {len(results)} results, email sent to {all_recipients}")
+            except Exception as e:
+                email_error = str(e)
+                logger.error(f"Scheduled analysis: email send failed: {e}", exc_info=True)
 
-        # Phase 4: GCS에 결과 저장 (수신자 유무와 무관하게 항상 실행 — 홈페이지 기본값이 됨)
+        # Phase 4: GCS에 결과 저장 (이메일 성공 여부와 무관하게 항상 실행 — 홈페이지 기본값이 됨)
         save_results_to_gcs(date_str, {
             "market_data": market_data,
             "all_stocks": all_stocks,
@@ -2592,7 +2599,7 @@ def run_scheduled_analysis(target_date=None):
 
         return {
             "status": "done", "sent": sent,
-            "reason": None if sent else "no recipients",
+            "reason": email_error if email_error else (None if sent else "no recipients"),
             "recipients": all_recipients if sent else [],
             "results_count": len(results), "date": date_str,
         }
