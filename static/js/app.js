@@ -95,6 +95,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // Email copy / fundamentals table sections
     const emailCopySection = document.getElementById("emailCopySection");
     const fundamentalsTableSection = document.getElementById("fundamentalsTableSection");
+    const fundamentalsTableToggle = document.getElementById("fundamentalsTableToggle");
+    const fundamentalsTableBodyWrap = document.getElementById("fundamentalsTableBodyWrap");
     const fundamentalsTable = document.getElementById("fundamentalsTable");
     const fundamentalsTableBody = document.getElementById("fundamentalsTableBody");
     const fundamentalsUploadInput = document.getElementById("fundamentalsUploadInput");
@@ -177,6 +179,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Save model
     saveModelBtn.addEventListener("click", saveModel);
+
+    // 종목별 엑셀표 toggle (기본 접힘)
+    if (fundamentalsTableToggle && fundamentalsTableBodyWrap) {
+        fundamentalsTableToggle.addEventListener("click", () => {
+            const collapsed = fundamentalsTableBodyWrap.style.display === "none";
+            fundamentalsTableBodyWrap.style.display = collapsed ? "block" : "none";
+            fundamentalsTableToggle.textContent = collapsed ? "접기 ▲" : "펼치기 ▼";
+        });
+    }
 
     // Prompt toggle
     if (promptToggle) {

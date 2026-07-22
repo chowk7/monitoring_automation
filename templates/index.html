@@ -407,6 +407,7 @@
         <section id="fundamentalsTableSection" class="card" style="display:none;">
             <div class="section-header">
                 <h2>종목별 엑셀표</h2>
+                <button id="fundamentalsTableToggle" class="btn btn-toggle">펼치기 ▼</button>
                 <button id="downloadExcelBtn" class="btn btn-copy">
                     📊 엑셀 다운로드
                 </button>
@@ -416,14 +417,16 @@
                 </button>
                 <span id="uploadExcelStatus" style="font-size:13px;"></span>
             </div>
-            <small class="settings-hint" style="display:block;margin-bottom:10px;">
-                업로드한 값은 API로 가져온 값보다 우선 적용됩니다 · 다운로드한 파일을 그대로 수정 후 재업로드하면 Ticker 열로 안전하게 매칭됩니다 · 파일은 브라우저에서만 처리되며 서버로 전송되지 않습니다.
-            </small>
-            <div style="overflow-x:auto;">
-                <table id="fundamentalsTable" class="fundamentals-table">
-                    <thead></thead>
-                    <tbody id="fundamentalsTableBody"></tbody>
-                </table>
+            <div id="fundamentalsTableBodyWrap" style="display:none;">
+                <small class="settings-hint" style="display:block;margin-bottom:10px;">
+                    업로드한 값은 API로 가져온 값보다 우선 적용됩니다 · 다운로드한 파일을 그대로 수정 후 재업로드하면 Ticker 열로 안전하게 매칭됩니다 · 파일은 브라우저에서만 처리되며 서버로 전송되지 않습니다.
+                </small>
+                <div style="overflow-x:auto;">
+                    <table id="fundamentalsTable" class="fundamentals-table">
+                        <thead></thead>
+                        <tbody id="fundamentalsTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
