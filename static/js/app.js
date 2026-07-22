@@ -2046,12 +2046,6 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
         }
         analysisResults.insertAdjacentHTML("beforeend", html);
-
-        // Scroll to show new results (only after first batch to avoid disruption)
-        if (currentResults.length <= (results?.length || 0) + 3) {
-            const lastCard = analysisResults.querySelector(".result-card:last-child");
-            if (lastCard) lastCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        }
     }
 
     function formatAnalysis(text) {
