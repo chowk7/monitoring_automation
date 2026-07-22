@@ -2506,7 +2506,9 @@ def run_scheduled_analysis(target_date=None):
             # 휴장이 아닌 종목을 대상으로 필터링
             if not is_market_closed and abs(result.get("change_pct", 0)) >= change_threshold:
                 filtered_list.append((tkr, result))
-        filtered_list.sort(key=lambda x: abs(x[1].get("change_pct", 0)), reverse=True)
+        # Sort by ticker registration order (matches 분석 실행/UI ordering)
+        ticker_order = {t["ticker"]: i for i, t in enumerate(ticker_objects)}
+        filtered_list.sort(key=lambda x: ticker_order.get(x[0], 9999))
         # 카테고리별 평균 등락률 계산
         category_stats = {}
         for tkr, info in all_stocks.items():
