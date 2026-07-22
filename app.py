@@ -843,6 +843,11 @@ def upload_tickers_csv():
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
     settings = load_settings()
+    # 프론트엔드는 이 두 값을 쓰지 않는다 — webhook_token은 /api/webhook/info
+    # 전용 엔드포인트로만 노출해야 하고, gemini_api_key는 코드 어디에서도 더
+    # 이상 읽지 않는 legacy 필드라 그대로 두면 실제 키 값이 유출된다.
+    settings.pop("webhook_token", None)
+    settings.pop("gemini_api_key", None)
     settings["available_models"] = AVAILABLE_GEMINI_MODELS
     settings["has_google_search"] = bool(GOOGLE_API_KEY and GOOGLE_CSE_ID)
     settings["has_email"] = bool(SMTP_USER and SMTP_PASSWORD)
