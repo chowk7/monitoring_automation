@@ -1120,6 +1120,26 @@ def sort_results_for_email(results, ticker_objects=None):
     return [item[3] for item in decorated]
 
 
+def strip_english_and_refs(text):
+    """Remove REFS:[...] tags and English-dominant lines, keeping Korean-only
+    lines. Mirrors static/js/app.js's stripEnglishAndRefs (used there for the
+    이메일 복붙용 결과 preview) so the actual sent emails match."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"REFS:\[[^\]]*\]", "", text).strip()
+    korean_lines = []
+    for line in cleaned.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        ascii_count = len(re.findall(r"[A-Za-z]", line))
+        total_chars = len(re.sub(r"\s", "", line))
+        if total_chars > 0 and ascii_count / total_chars > 0.3:
+            continue
+        korean_lines.append(line)
+    return " ".join(korean_lines).strip()
+
+
 def build_email_html(results, date_str, market_data=None, all_stocks=None, category_stats=None, ticker_objects=None):
     """Build HTML email in 맑은고딕 10.5pt with 시장/개별회사 sections."""
     from datetime import date as date_cls
@@ -1194,7 +1214,7 @@ def build_email_html(results, date_str, market_data=None, all_stocks=None, categ
     # Build 개별회사 section (2열 테이블 형식)
     company_rows = ""
     for r in sorted_results:
-        analysis_text = r.get("analysis", "").replace("\n", " ").strip()
+        analysis_text = strip_english_and_refs(r.get("analysis", ""))
         chg_html = fmt_chg(r["change_pct"], 1)
         company_rows += (
             f'<tr>'
@@ -1298,7 +1318,7 @@ def build_email_text(results, date_str, market_data=None, ticker_objects=None):
     if sorted_results:
         lines.append("개별회사")
         for r in sorted_results:
-            analysis_text = r.get("analysis", "").replace("\n", " ").strip()
+            analysis_text = strip_english_and_refs(r.get("analysis", ""))
             lines.append(f"- {r['name']} ({fmt_chg(r['change_pct'])}): {analysis_text}")
 
     return "\n".join(lines)
