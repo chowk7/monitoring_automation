@@ -1346,6 +1346,22 @@ def get_market_indices():
     })
 
 
+def ticker_region(ticker):
+    """티커 접미사 → 해당 시장 region. 매핑 안 되면(미국/유럽 등) None."""
+    t = ticker.upper()
+    if t.endswith((".KS", ".KQ")):
+        return "한국"
+    if t.endswith(".T"):
+        return "일본"
+    if t.endswith(".TW"):
+        return "대만"
+    if t.endswith(".HK"):
+        return "홍콩"
+    if t.endswith((".SS", ".SZ")):
+        return "중국"
+    return None
+
+
 @app.route("/api/analyze/stream", methods=["GET"])
 def analyze_stream():
     """Streaming analysis - sends results in batches via SSE."""
@@ -1448,7 +1464,13 @@ def analyze_stream():
             _manual_run_cache[cache_date_str]["market_data"] = {
                 "indices": indices_data, "analysis": market_analysis, "date": trade_date_for_market,
             }
+            # 휴장 시장 목록 — 나중 배치(skip_market=True)에서도 쓸 수 있게 캐시에 저장
+            _manual_run_cache[cache_date_str]["closed_markets"] = [
+                idx["region"] for idx in indices_data if idx.get("is_closed")
+            ]
             gc.collect()
+
+        closed_markets = set(_manual_run_cache.get(cache_date_str, {}).get("closed_markets", []))
 
         # Phase 1: Fetch all stock data in batches
         all_stocks_slim = {}
@@ -1463,17 +1485,23 @@ def analyze_stream():
             yield f"data: {json.dumps({'type': 'progress', 'message': f'주가 수집 중... ({batch_num}/{total_batches})'})}\n\n"
 
             for ticker in batch:
+                tkr_region = ticker_region(ticker)
+                is_closed_market = tkr_region is not None and tkr_region in closed_markets
                 result = fetch_single_ticker(ticker, target_date=target_date)
                 meta = ticker_meta.get(ticker, {})
+                err_msg = result.get("error", "")
+                is_market_closed = is_closed_market or result.get("is_closed", False) or ("Insufficient data" in err_msg if err_msg else False)
                 all_stocks_slim[ticker] = {
                     "name": result.get("name") or meta.get("name") or ticker,
                     "change_pct": result.get("change_pct", 0),
                     "category": meta.get("category", ""),
                 }
-                if "error" in result:
-                    all_stocks_slim[ticker]["error"] = result["error"]
+                if err_msg:
+                    all_stocks_slim[ticker]["error"] = err_msg
+                if is_market_closed:
+                    all_stocks_slim[ticker]["is_closed"] = True
 
-                if abs(result.get("change_pct", 0)) >= change_threshold:
+                if not is_market_closed and abs(result.get("change_pct", 0)) >= change_threshold:
                     filtered_list.append((ticker, result))
 
             gc.collect()
@@ -1485,7 +1513,7 @@ def analyze_stream():
             if cat not in category_stats:
                 category_stats[cat] = {"total": 0.0, "count": 0, "tickers": []}
             category_stats[cat]["tickers"].append(tkr)
-            if not info.get("error"):
+            if not info.get("error") and not info.get("is_closed"):
                 category_stats[cat]["total"] += info["change_pct"]
                 category_stats[cat]["count"] += 1
         for cat in category_stats:
@@ -1507,7 +1535,7 @@ def analyze_stream():
             if cat not in cached_category_stats:
                 cached_category_stats[cat] = {"total": 0.0, "count": 0, "tickers": []}
             cached_category_stats[cat]["tickers"].append(tkr)
-            if not info.get("error"):
+            if not info.get("error") and not info.get("is_closed"):
                 cached_category_stats[cat]["total"] += info["change_pct"]
                 cached_category_stats[cat]["count"] += 1
         for cat in cached_category_stats:
@@ -2450,21 +2478,6 @@ def run_scheduled_analysis(target_date=None):
         for idx in indices_data:
             if idx.get("is_closed"):
                 closed_markets.add(idx["region"])
-
-        # 티커suffix → 시장region 매핑
-        def ticker_region(ticker):
-            t = ticker.upper()
-            if t.endswith((".KS", ".KQ")):
-                return "한국"
-            if t.endswith(".T"):
-                return "일본"
-            if t.endswith(".TW"):
-                return "대만"
-            if t.endswith(".HK"):
-                return "홍콩"
-            if t.endswith((".SS", ".SZ")):
-                return "중국"
-            return None  # 미국/유럽 등
 
         # Phase 1: 종목 데이터 수집 + 필터링
         logger.info("Fetching ticker data...")
