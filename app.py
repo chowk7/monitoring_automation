@@ -2625,6 +2625,38 @@ def _get_or_create_webhook_token():
     return token
 
 
+@app.route("/api/google-cse/test", methods=["GET"])
+def google_cse_test():
+    """Google CSE 직접 호출 테스트 — 설정상 활성화 여부가 아니라 실제 검색
+    호출이 성공하는지, 실패한다면 구글이 뭐라고 하는지(권한/할당량/CSE 설정
+    오류) 확인하기 위한 진단용. search_news_articles_google()은 실패 시
+    조용히 빈 리스트만 반환하도록 되어 있어 실제 원인을 알 수 없다."""
+    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
+        return jsonify({"ok": False, "error": "GOOGLE_API_KEY 또는 GOOGLE_CSE_ID가 설정되지 않았습니다."}), 400
+    query = request.args.get("q", "삼성전자 주가")
+    try:
+        resp = requests.get(
+            "https://www.googleapis.com/customsearch/v1",
+            params={"key": GOOGLE_API_KEY, "cx": GOOGLE_CSE_ID, "q": query, "num": 5},
+            timeout=10,
+        )
+        try:
+            data = resp.json()
+        except ValueError:
+            data = {}
+        return jsonify({
+            "ok": resp.status_code == 200,
+            "status_code": resp.status_code,
+            "query": query,
+            "cx": GOOGLE_CSE_ID,
+            "result_count": len(data.get("items", [])),
+            "titles": [item.get("title") for item in data.get("items", [])],
+            "google_error": data.get("error"),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/gcs/status", methods=["GET"])
 def gcs_status():
     """GCS 연동 상태 확인."""
